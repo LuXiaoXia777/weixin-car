@@ -1,12 +1,12 @@
-"""调用 OpenAI Responses API 生成结构化运营分析。"""
+"""调用 DeepSeek Chat Completions API 生成结构化运营分析。"""
 
 from __future__ import annotations
 
 import json
 from pathlib import Path
 
-from openai import OpenAI
 from pydantic import BaseModel, Field
+import requests
 
 from services.data_loader import Article
 
@@ -24,24 +24,46 @@ def analyze_articles(
     *,
     api_key: str,
     model: str,
+    base_url: str,
     prompt_file: Path,
+    timeout: int = 60,
 ) -> AnalysisResult:
     prompt = prompt_file.read_text(encoding="utf-8")
     article_data = [article.to_dict() for article in articles]
     report_date = max(article.date for article in articles).isoformat()
-    client = OpenAI(api_key=api_key)
-
-    response = client.responses.parse(
-        model=model,
-        instructions=prompt,
-        input=(
-            f"请分析以下过去7天的公众号文章数据。日报日期为 {report_date}。"
-            "best_article 必须从日报日期的文章中选择。"
-            "只依据给定数据判断，不要虚构热点、车型信息或指标。\n"
-            + json.dumps(article_data, ensure_ascii=False, indent=2)
-        ),
-        text_format=AnalysisResult,
+    user_prompt = (
+        f"请分析以下过去7天的公众号文章数据。日报日期为 {report_date}。"
+        "best_article 必须从日报日期的文章中选择。"
+        "只依据给定数据判断，不要虚构热点、车型信息或指标。"
+        "请严格返回 JSON，字段必须为 summary、best_article、reason、trend、suggestions。\n"
+        + json.dumps(article_data, ensure_ascii=False, indent=2)
     )
-    if response.output_parsed is None:
-        raise RuntimeError("OpenAI 未返回可解析的分析结果")
-    return response.output_parsed
+    response = requests.post(
+        f"{base_url.rstrip('/')}/chat/completions",
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        },
+        json={
+            "model": model,
+            "messages": [
+                {"role": "system", "content": prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+            "response_format": {"type": "json_object"},
+            "temperature": 0.3,
+            "max_tokens": 1200,
+            "stream": False,
+        },
+        timeout=timeout,
+    )
+    response.raise_for_status()
+    payload = response.json()
+
+    try:
+        content = payload["choices"][0]["message"]["content"]
+        if not content:
+            raise ValueError("响应内容为空")
+        return AnalysisResult.model_validate_json(content)
+    except (KeyError, IndexError, TypeError, ValueError) as exc:
+        raise RuntimeError(f"DeepSeek 返回内容无法解析：{payload}") from exc
