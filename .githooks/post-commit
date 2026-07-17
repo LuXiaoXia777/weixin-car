@@ -1,0 +1,18 @@
+#!/bin/sh
+
+# Push every successful local commit to the matching remote branch.
+branch=$(git branch --show-current)
+
+if [ -z "$branch" ]; then
+    echo "[auto-push] Detached HEAD; skipping push."
+    exit 0
+fi
+
+if git rev-parse --abbrev-ref '@{upstream}' >/dev/null 2>&1; then
+    echo "[auto-push] Pushing $branch..."
+    git push
+else
+    echo "[auto-push] Setting origin/$branch as upstream and pushing..."
+    git push --set-upstream origin "$branch"
+fi
+

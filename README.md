@@ -110,3 +110,13 @@ date,title,category,views,likes,shares,comments,new_followers
 - 飞书多维表格与历史存储：新增独立 storage service。
 - 周报/月报：在数据加载后增加报告周期参数。
 - 自动选题库：保存 `suggestions` 到新的数据文件或外部存储。
+
+## 本机提交后自动推送
+
+仓库包含 `.githooks/post-commit`。在一台新电脑首次克隆仓库后，执行一次：
+
+```bash
+git config core.hooksPath .githooks
+```
+
+此后每次 `git commit` 成功都会自动推送当前分支。该功能不会自动执行 `git add`，提交前仍需确认暂存内容，避免误提交密钥或临时文件。
