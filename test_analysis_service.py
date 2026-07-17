@@ -28,7 +28,11 @@ class RealSupabaseAnalysisTests(unittest.TestCase):
     def test_unified_report_shape_and_latest_date(self):
         self.assertEqual(
             set(self.report),
-            {"date", "overview", "top_articles", "trend_analysis", "channel_analysis"},
+            {
+                "date", "overview", "account_score", "daily_trend",
+                "hot_article_analysis", "top5_articles", "top_articles",
+                "trend_analysis", "channel_analysis",
+            },
         )
         self.assertEqual(self.report["date"], "2026-07-16")
 
@@ -56,6 +60,15 @@ class RealSupabaseAnalysisTests(unittest.TestCase):
         self.assertGreater(len(trend["daily_account_data"]), 0)
         self.assertGreater(len(self.report["channel_analysis"]), 0)
         self.assertEqual(self.report["channel_analysis"][0]["main_channel"], "推荐")
+
+    def test_dashboard_2_fields_are_data_driven(self):
+        self.assertGreaterEqual(self.report["account_score"]["score"], 0)
+        self.assertLessEqual(self.report["account_score"]["score"], 100)
+        self.assertEqual(len(self.report["daily_trend"]), 7)
+        self.assertLessEqual(len(self.report["top5_articles"]), 5)
+        hot = self.report["hot_article_analysis"]
+        self.assertEqual(hot["title"], self.report["top_articles"][0]["title"])
+        self.assertTrue(hot["multiple"].endswith("x"))
 
     def test_report_json_is_written(self):
         with TemporaryDirectory() as directory:

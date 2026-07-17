@@ -11,3 +11,4 @@ logs/
 debug/
 report.json
 ai_analysis.json
+data/charts/

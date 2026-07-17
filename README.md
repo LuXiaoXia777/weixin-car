@@ -167,6 +167,19 @@ python import_wechat_data.py data/imports/微信数据.csv --account-name 车事
 
 模型通过 GitHub Repository Variable `DEEPSEEK_MODEL` 控制，当前默认使用 `deepseek-v4-flash`。进入 **Settings → Secrets and variables → Actions → Variables** 即可更换模型，无需修改代码。API 地址默认为 `https://api.deepseek.com`，也可通过 `DEEPSEEK_BASE_URL` 覆盖。
 
+### 飞书日报 2.0 图表配置
+
+日报会在 `data/charts/` 生成近7天阅读趋势图和TOP5文章排行图。飞书卡片图片必须先通过飞书开放平台上传并取得 `image_key`，本机文件路径不能直接显示在群卡片中。
+
+若希望卡片显示两张图，请创建飞书企业自建应用，配置以下环境变量：
+
+```bash
+FEISHU_APP_ID=你的飞书应用AppID
+FEISHU_APP_SECRET=你的飞书应用AppSecret
+```
+
+只配置 `FEISHU_WEBHOOK_URL` 时，系统仍会生成本地图表并正常发送日报，但卡片内会自动使用紧凑文字版趋势和TOP5排行。
+
 ## 后续扩展位置
 
 - 微信公众号 API：在 `services/data_loader.py` 增加新的数据源实现。

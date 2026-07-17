@@ -14,6 +14,7 @@ from pydantic import ValidationError
 
 from config import Settings
 from services.ai_analyzer import AIAnalysisResult, load_report
+from services.report_visualizer import generate_report_charts
 
 
 LOGGER = logging.getLogger(__name__)
@@ -67,26 +68,116 @@ def _heading(title: str) -> dict[str, Any]:
     }
 
 
-def build_card(report: dict[str, Any], analysis: AIAnalysisResult) -> dict[str, Any]:
+def _image(image_key: str, alt: str) -> dict[str, Any]:
+    return {
+        "tag": "img",
+        "img_key": image_key,
+        "alt": {"tag": "plain_text", "content": alt},
+        "mode": "fit_horizontal",
+    }
+
+
+def _score_icon(score: int) -> str:
+    return "🟢" if score >= 70 else "🟡" if score >= 50 else "🔴"
+
+
+def build_card(
+    report: dict[str, Any],
+    analysis: AIAnalysisResult,
+    *,
+    chart_image_keys: dict[str, str] | None = None,
+) -> dict[str, Any]:
     """生成可直接发送给飞书群机器人的卡片请求体。"""
     overview = report.get("overview") or {}
-    top_articles = report.get("top_articles") or []
-    best = next(
-        (row for row in top_articles if row.get("title") == analysis.best_article.title),
-        top_articles[0] if top_articles else {},
-    )
-    suggestions = "\n".join(
-        f"{index}. {_clean(item)}"
+    score = report.get("account_score") or {"score": 0, "level": "数据不足"}
+    hot = report.get("hot_article_analysis") or {}
+    top5 = report.get("top5_articles") or []
+    chart_image_keys = chart_image_keys or {}
+    suggestions = "\n\n".join(
+        f"**{index}. {_clean(item.title)}**\n"
+        f"为什么推荐：{_clean(item.reason)}\n"
+        f"参考数据：{_clean(item.reference_data)}\n"
+        f"预计表现：{_clean(item.expected_performance)}"
         for index, item in enumerate(analysis.tomorrow_suggestions, start=1)
     )
     best_content = (
-        f"**{_clean(analysis.best_article.title)}**\n"
-        f"阅读人数：{_clean(best.get('read_users'))}\n"
-        f"AI分析：{_clean(analysis.best_article.reason)}"
+        f"🔥 **{_clean(hot.get('title') or analysis.best_article.title)}**\n"
+        f"阅读人数：{_clean(hot.get('views'))}\n"
+        f"超过文章平均：{_clean(hot.get('multiple'))}\n"
+        f"主要流量：{_clean(hot.get('traffic_source'))}\n\n"
+        f"**爆款原因**\n"
+        + "\n".join(f"{index}. {_clean(reason)}" for index, reason in enumerate(hot.get("reason") or [], 1))
+        + f"\n可复用公式：{_clean(hot.get('formula'))}"
     )
-    trend_content = (
-        f"{_clean(analysis.content_trend)}\n"
-        f"**当前问题：** {_clean(analysis.problems)}"
+    top5_content = "\n".join(
+        f"**TOP{index}**　{_clean(row.get('title'))}\n"
+        f"阅读 {_clean(row.get('views'))}｜{_clean(row.get('category'))}"
+        for index, row in enumerate(top5, 1)
+    )
+    pattern_content = "\n".join(
+        f"{index}. {_clean(pattern)}"
+        for index, pattern in enumerate(analysis.weekly_content_patterns, 1)
+    )
+
+    elements: list[dict[str, Any]] = [
+        {
+            "tag": "div",
+            "text": {
+                "tag": "plain_text",
+                "content": f"数据日期：{_clean(report.get('date'))}",
+            },
+        },
+        {"tag": "hr"},
+        _heading("① 今日健康度"),
+        {
+            "tag": "div",
+            "text": {
+                "tag": "lark_md",
+                "content": f"**{score.get('score', 0)}分 {_score_icon(score.get('score', 0))}**　{_clean(score.get('level'))}",
+            },
+        },
+        {"tag": "hr"},
+        _heading("② 核心指标"),
+        {
+            "tag": "div",
+            "fields": [
+                _field("阅读", _metric(overview.get("views"))),
+                _field("分享", _metric(overview.get("shares"))),
+                _field("收藏", _metric(overview.get("favorites"))),
+                _field("发布", _metric(overview.get("publish_count"))),
+            ],
+        },
+        {"tag": "hr"},
+        _heading("③ 近7天阅读趋势"),
+    ]
+    if chart_image_keys.get("trend"):
+        elements.append(_image(chart_image_keys["trend"], "近7天阅读趋势图"))
+    else:
+        trend_text = "　".join(
+            f"{str(row.get('date', ''))[5:]}：{_clean(row.get('views'))}"
+            for row in report.get("daily_trend") or []
+        )
+        elements.append({"tag": "div", "text": {"tag": "plain_text", "content": trend_text or "数据不足"}})
+    elements.extend(
+        [
+            {"tag": "hr"},
+            _heading("④ 今日爆款"),
+            {"tag": "div", "text": {"tag": "lark_md", "content": best_content}},
+            {"tag": "hr"},
+            _heading("⑤ TOP5文章排行"),
+        ]
+    )
+    if chart_image_keys.get("top5"):
+        elements.append(_image(chart_image_keys["top5"], "TOP5文章排行图"))
+    elements.extend(
+        [
+            {"tag": "div", "text": {"tag": "lark_md", "content": top5_content or "数据不足"}},
+            {"tag": "hr"},
+            _heading("⑥ AI运营建议"),
+            {"tag": "div", "text": {"tag": "lark_md", "content": f"**本周内容规律**\n{pattern_content}"}},
+            {"tag": "div", "text": {"tag": "lark_md", "content": f"**当前问题**\n{_clean(analysis.problems)}"}},
+            {"tag": "div", "text": {"tag": "lark_md", "content": f"**明日建议**\n\n{suggestions}"}},
+        ]
     )
 
     return {
@@ -97,40 +188,39 @@ def build_card(report: dict[str, Any], analysis: AIAnalysisResult) -> dict[str, 
                 "template": "blue",
                 "title": {
                     "tag": "plain_text",
-                    "content": "🚗 车事人话公众号运营日报",
+                    "content": "🚗 车事人话公众号运营日报 2.0",
                 },
             },
-            "elements": [
-                {
-                    "tag": "div",
-                    "text": {
-                        "tag": "plain_text",
-                        "content": f"数据日期：{_clean(report.get('date'))}",
-                    },
-                },
-                {"tag": "hr"},
-                _heading("📊 今日数据概览"),
-                {
-                    "tag": "div",
-                    "fields": [
-                        _field("阅读人数", _metric(overview.get("views"))),
-                        _field("分享人数", _metric(overview.get("shares"))),
-                        _field("收藏人数", _metric(overview.get("favorites"))),
-                        _field("发布篇数", _metric(overview.get("publish_count"))),
-                    ],
-                },
-                {"tag": "hr"},
-                _heading("🔥 今日最佳文章"),
-                {"tag": "div", "text": {"tag": "lark_md", "content": best_content}},
-                {"tag": "hr"},
-                _heading("📈 内容趋势"),
-                {"tag": "div", "text": {"tag": "lark_md", "content": trend_content}},
-                {"tag": "hr"},
-                _heading("💡 明日选题建议"),
-                {"tag": "div", "text": {"tag": "lark_md", "content": suggestions}},
-            ],
+            "elements": elements,
         },
     }
+
+
+def upload_card_image(app_id: str, app_secret: str, image_path: Path, *, timeout: int = 30) -> str:
+    """使用飞书应用凭证上传卡片图片并返回 image_key。"""
+    token_response = requests.post(
+        "https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal",
+        json={"app_id": app_id, "app_secret": app_secret},
+        timeout=timeout,
+    )
+    token_response.raise_for_status()
+    token_payload = token_response.json()
+    if token_payload.get("code") != 0 or not token_payload.get("tenant_access_token"):
+        raise RuntimeError(f"获取飞书 tenant_access_token 失败：{token_payload.get('msg', '未知错误')}")
+    with image_path.open("rb") as image_file:
+        response = requests.post(
+            "https://open.feishu.cn/open-apis/im/v1/images",
+            headers={"Authorization": f"Bearer {token_payload['tenant_access_token']}"},
+            data={"image_type": "message"},
+            files={"image": (image_path.name, image_file, "image/png")},
+            timeout=timeout,
+        )
+    response.raise_for_status()
+    payload = response.json()
+    image_key = (payload.get("data") or {}).get("image_key")
+    if payload.get("code") != 0 or not image_key:
+        raise RuntimeError(f"上传飞书卡片图片失败：{payload.get('msg', '未知错误')}")
+    return image_key
 
 
 def send_card(
@@ -196,7 +286,26 @@ def main() -> None:
     settings = Settings.from_env(require_feishu=True)
     report = load_report(args.report)
     analysis = load_ai_analysis(args.analysis)
-    send_card(settings.feishu_webhook_url, build_card(report, analysis))
+    charts = generate_report_charts(report, Path("data/charts"))
+    image_keys: dict[str, str] = {}
+    if settings.feishu_app_id and settings.feishu_app_secret:
+        image_keys = {
+            name: upload_card_image(
+                settings.feishu_app_id,
+                settings.feishu_app_secret,
+                path,
+            )
+            for name, path in charts.items()
+        }
+    else:
+        LOGGER.warning(
+            "未配置 FEISHU_APP_ID/FEISHU_APP_SECRET，本地图表已生成，"
+            "飞书卡片将使用文字版趋势和排行"
+        )
+    send_card(
+        settings.feishu_webhook_url,
+        build_card(report, analysis, chart_image_keys=image_keys),
+    )
     print(f"飞书日报推送成功：{report['date']}")
 
 

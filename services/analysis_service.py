@@ -152,6 +152,7 @@ class AnalysisService:
             ranked.append(
                 {
                     "title": article["title"],
+                    "category": article.get("category") or _topic(article["title"]),
                     "read_users": reads,
                     "interactions": {
                         "shares": shares,
@@ -189,7 +190,7 @@ class AnalysisService:
             "GET",
             "account_daily_stats",
             params={
-                "select": "stat_date,views,publish_count",
+                "select": "stat_date,views,shares,publish_count",
                 "account_id": f"eq.{account_id}",
                 "stat_date": f"gte.{start.isoformat()}",
                 "order": "stat_date.asc",
@@ -264,19 +265,152 @@ class AnalysisService:
             )
         return sorted(result, key=lambda item: item["read_users"] or 0, reverse=True)
 
+    @staticmethod
+    def _daily_trend(trend_analysis: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        daily = next(
+            (row["value"] for row in trend_analysis if row["metric"] == "daily_account_data"),
+            [],
+        )
+        return [
+            {
+                "date": row["stat_date"],
+                "views": row.get("views"),
+                "shares": row.get("shares"),
+                "articles": row.get("publish_count"),
+            }
+            for row in daily
+        ]
+
+    @staticmethod
+    def _account_score(
+        overview: dict[str, Any],
+        daily_trend: list[dict[str, Any]],
+        top_articles: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        reasons: list[str] = []
+        view_change = overview["views"].get("change_rate")
+        if view_change is None:
+            reading_score = 0
+            reasons.append("阅读环比缺失，阅读趋势项计0分")
+        elif view_change >= 0.10:
+            reading_score = 25
+            reasons.append(f"阅读环比增长{view_change * 100:.1f}%，阅读趋势25/25")
+        elif view_change >= 0:
+            reading_score = 20
+            reasons.append(f"阅读环比增长{view_change * 100:.1f}%，阅读趋势20/25")
+        elif view_change >= -0.10:
+            reading_score = 15
+            reasons.append(f"阅读环比下降{abs(view_change) * 100:.1f}%，阅读趋势15/25")
+        elif view_change >= -0.25:
+            reading_score = 8
+            reasons.append(f"阅读环比下降{abs(view_change) * 100:.1f}%，阅读趋势8/25")
+        else:
+            reading_score = 3
+            reasons.append(f"阅读环比下降{abs(view_change) * 100:.1f}%，阅读趋势3/25")
+
+        views = overview["views"].get("value")
+        shares = overview["shares"].get("value")
+        favorites = overview["favorites"].get("value")
+        share_rate = shares / views if shares is not None and views else None
+        favorite_rate = favorites / views if favorites is not None and views else None
+        share_score = round(min(share_rate / 0.02, 1) * 20) if share_rate is not None else 0
+        favorite_score = (
+            round(min(favorite_rate / 0.01, 1) * 15) if favorite_rate is not None else 0
+        )
+        reasons.append(
+            f"分享率{share_rate * 100:.2f}%，分享项{share_score}/20"
+            if share_rate is not None
+            else "分享率数据缺失，分享项计0分"
+        )
+        reasons.append(
+            f"收藏率{favorite_rate * 100:.2f}%，收藏项{favorite_score}/15"
+            if favorite_rate is not None
+            else "收藏率数据缺失，收藏项计0分"
+        )
+
+        published = sum(row.get("articles") or 0 for row in daily_trend)
+        publish_score = min(published, 5) * 4
+        reasons.append(f"近7天发布{published}篇，发布频率{publish_score}/20")
+
+        reads = [row["read_users"] for row in top_articles if row.get("read_users") is not None]
+        multiple = max(reads) / mean(reads) if reads and mean(reads) else None
+        hot_score = round(min((multiple or 0) / 3, 1) * 20)
+        reasons.append(
+            f"最高阅读为文章均值的{multiple:.1f}倍，爆款表现{hot_score}/20"
+            if multiple is not None
+            else "文章阅读数据缺失，爆款表现计0分"
+        )
+        score = min(100, reading_score + share_score + favorite_score + publish_score + hot_score)
+        level = "优秀" if score >= 85 else "良好" if score >= 70 else "需关注" if score >= 50 else "待改善"
+        return {"score": score, "level": level, "reasons": reasons}
+
+    @staticmethod
+    def _hot_article_analysis(
+        top_articles: list[dict[str, Any]],
+        channel_analysis: list[dict[str, Any]],
+    ) -> dict[str, Any] | None:
+        if not top_articles:
+            return None
+        best = top_articles[0]
+        reads = [row["read_users"] for row in top_articles if row.get("read_users") is not None]
+        average = mean(reads) if reads else None
+        multiple = best.get("read_users") / average if average and best.get("read_users") is not None else None
+        channel = next(
+            (row.get("main_channel") for row in channel_analysis if row["title"] == best["title"]),
+            None,
+        )
+        title = best["title"]
+        reasons: list[str] = []
+        formula_parts = ["车型"]
+        if any(token in title for token in ("贵", "万", "价格", "预算", "性价比")):
+            reasons.append("标题包含价格或预算决策信息")
+            formula_parts.append("价格差")
+        if any(token in title for token in ("为什么", "到底", "值不值", "能买吗", "买前", "谁更")):
+            reasons.append("标题直接回答购买决策问题")
+            formula_parts.append("购买疑问")
+        if any(char.isdigit() for char in title):
+            reasons.append("标题使用具体数字降低信息模糊度")
+            formula_parts.append("数字清单")
+        if channel:
+            reasons.append(f"主要流量来源为{channel}")
+        if not reasons:
+            reasons.append("仅能确认阅读表现领先，标题驱动因素数据不足")
+        return {
+            "title": title,
+            "views": best.get("read_users"),
+            "multiple": f"{multiple:.1f}x" if multiple is not None else None,
+            "traffic_source": channel,
+            "reason": reasons,
+            "formula": "+".join(dict.fromkeys(formula_parts)),
+        }
+
     def build_report(self) -> dict[str, Any]:
         marker: LatestReportData = load_latest_report_data(self.client, self.account_name)
         account_id = self._account_id()
         articles = self._articles(account_id)
         stats = self._stats(marker.stat_date)
+        overview = self._overview(account_id, marker.stat_date)
+        top_articles = self._top_articles(stats, articles)
+        trend_analysis = self._trend_analysis(account_id, marker.stat_date, articles, stats)
+        channel_analysis = self._channel_analysis(marker.stat_date, articles)
+        daily_trend = self._daily_trend(trend_analysis)
         return {
             "date": marker.stat_date.isoformat(),
-            "overview": self._overview(account_id, marker.stat_date),
-            "top_articles": self._top_articles(stats, articles),
-            "trend_analysis": self._trend_analysis(
-                account_id, marker.stat_date, articles, stats
-            ),
-            "channel_analysis": self._channel_analysis(marker.stat_date, articles),
+            "overview": overview,
+            "account_score": self._account_score(overview, daily_trend, top_articles),
+            "daily_trend": daily_trend,
+            "hot_article_analysis": self._hot_article_analysis(top_articles, channel_analysis),
+            "top5_articles": [
+                {
+                    "title": row["title"],
+                    "views": row.get("read_users"),
+                    "category": row["category"],
+                }
+                for row in top_articles[:5]
+            ],
+            "top_articles": top_articles,
+            "trend_analysis": trend_analysis,
+            "channel_analysis": channel_analysis,
         }
 
     def write_report(self, output_path: Path) -> dict[str, Any]:

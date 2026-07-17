@@ -14,6 +14,8 @@ BASE_DIR = Path(__file__).resolve().parent
 class Settings:
     deepseek_api_key: str
     feishu_webhook_url: str
+    feishu_app_id: str = ""
+    feishu_app_secret: str = ""
     deepseek_model: str = "deepseek-v4-flash"
     deepseek_base_url: str = "https://api.deepseek.com"
     articles_csv: Path = BASE_DIR / "data" / "articles.csv"
@@ -30,6 +32,8 @@ class Settings:
         return cls(
             deepseek_api_key=api_key,
             feishu_webhook_url=webhook,
+            feishu_app_id=os.getenv("FEISHU_APP_ID", "").strip(),
+            feishu_app_secret=os.getenv("FEISHU_APP_SECRET", "").strip(),
             deepseek_model=os.getenv("DEEPSEEK_MODEL", "deepseek-v4-flash").strip(),
             deepseek_base_url=os.getenv(
                 "DEEPSEEK_BASE_URL", "https://api.deepseek.com"

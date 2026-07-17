@@ -18,7 +18,12 @@ AI_RESULT = {
     "best_article": {"title": "测试文章", "reason": "阅读人数100。"},
     "content_trend": "数据不足，暂无法判断。",
     "problems": "数据不足，暂无法判断。",
-    "tomorrow_suggestions": ["建议1", "建议2", "建议3"],
+    "weekly_content_patterns": ["规律1", "规律2", "规律3"],
+    "tomorrow_suggestions": [
+        {"title": "建议1", "reason": "原因1", "reference_data": "数据1", "expected_performance": "预计1"},
+        {"title": "建议2", "reason": "原因2", "reference_data": "数据2", "expected_performance": "预计2"},
+        {"title": "建议3", "reason": "原因3", "reference_data": "数据3", "expected_performance": "预计3"},
+    ],
 }
 
 
@@ -26,6 +31,10 @@ def report_payload() -> dict:
     return {
         "date": "2026-07-16",
         "overview": {},
+        "account_score": {},
+        "daily_trend": [],
+        "hot_article_analysis": None,
+        "top5_articles": [],
         "top_articles": [],
         "trend_analysis": [],
         "channel_analysis": [],
