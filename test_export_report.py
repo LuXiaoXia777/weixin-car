@@ -9,11 +9,21 @@ from unittest.mock import MagicMock, patch
 from collector.export_report import (
     ExportReportError,
     XLS_SIGNATURE,
+    _trigger_content_download,
+    collect_page_actions,
     export_content_report,
     parse_report_date,
+    select_report_date,
     validate_download,
 )
 from collector.debug import save_debug_artifacts
+
+
+def _locator_with_items(*items):
+    locator = MagicMock()
+    locator.count.return_value = len(items)
+    locator.nth.side_effect = lambda index: items[index]
+    return locator
 
 
 class FakeDownload:
@@ -44,6 +54,77 @@ class ExportReportTests(unittest.TestCase):
             path.write_bytes(b"")
             with self.assertRaises(ExportReportError):
                 validate_download(path, date(2026, 7, 16))
+
+    @patch("collector.export_report.default_report_date", return_value=date(2026, 7, 16))
+    @patch("collector.export_report._named_action")
+    def test_default_date_uses_real_yesterday_option(self, named_action_mock, _date_mock):
+        page = MagicMock()
+        yesterday = MagicMock()
+        named_action_mock.return_value = yesterday
+
+        select_report_date(page, date(2026, 7, 16))
+
+        named_action_mock.assert_called_once_with(page, ("昨日", "昨天"), "昨日日期选项")
+        yesterday.click.assert_called_once_with()
+
+    @patch("collector.export_report._select_calendar_date")
+    @patch("collector.export_report.default_report_date", return_value=date(2026, 7, 17))
+    def test_explicit_date_uses_start_and_end_calendar(
+        self,
+        _date_mock,
+        select_calendar_mock,
+    ):
+        page = MagicMock()
+        target = date(2026, 7, 16)
+
+        select_report_date(page, target)
+
+        self.assertEqual(
+            select_calendar_mock.call_args_list,
+            [
+                unittest.mock.call(page, "开始日期", target),
+                unittest.mock.call(page, "结束日期", target),
+            ],
+        )
+
+    @patch("collector.export_report.log_page_actions")
+    @patch("collector.export_report._unique_visible")
+    def test_download_uses_real_download_detail_link(self, unique_mock, _log_mock):
+        page = MagicMock()
+        action = MagicMock()
+        unique_mock.return_value = action
+        context = MagicMock()
+        context.__enter__.return_value.value = FakeDownload()
+        page.expect_download.return_value = context
+
+        result = _trigger_content_download(page)
+
+        self.assertIsInstance(result, FakeDownload)
+        page.expect_download.assert_called_once_with(timeout=120_000)
+        action.click.assert_called_once_with()
+
+    def test_debug_control_inventory_includes_buttons_links_and_placeholders(self):
+        page = MagicMock()
+        button = MagicMock()
+        button.is_visible.return_value = True
+        button.inner_text.return_value = "前往查看"
+        link = MagicMock()
+        link.is_visible.return_value = True
+        link.inner_text.return_value = "下载数据明细"
+        page.get_by_role.side_effect = lambda role: {
+            "button": _locator_with_items(button),
+            "link": _locator_with_items(link),
+        }[role]
+        input_item = MagicMock()
+        input_item.is_visible.return_value = True
+        input_item.get_attribute.return_value = "开始日期"
+        page.locator.return_value = _locator_with_items(input_item)
+
+        result = collect_page_actions(page)
+
+        self.assertEqual(result["buttons"], [{"text": "前往查看"}])
+        self.assertEqual(result["links"], [{"text": "下载数据明细"}])
+        self.assertEqual(result["inputs"], [{"placeholder": "开始日期"}])
 
     @patch("collector.export_report._data_analysis_toggle")
     @patch("collector.export_report._content_analysis_link")

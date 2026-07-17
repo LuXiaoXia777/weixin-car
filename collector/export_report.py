@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import os
+import json
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from pathlib import Path
@@ -19,6 +20,7 @@ LOGGER = logging.getLogger(__name__)
 XLS_SIGNATURE = bytes.fromhex("D0CF11E0A1B11AE1")
 XLSX_SIGNATURE = b"PK\x03\x04"
 DOWNLOAD_TIMEOUT_MS = 120_000
+DATE_PICKER_TIMEOUT_MS = 10_000
 
 
 class ExportReportError(RuntimeError):
@@ -145,22 +147,58 @@ def navigate_to_content_analysis(
     LOGGER.info("已进入内容分析页面")
 
 
-def _fill_labeled_date(page: Page, label: str, value: str) -> bool:
-    candidates = (
-        page.get_by_label(label, exact=True),
-        page.get_by_placeholder(label, exact=True),
-        page.get_by_role("textbox", name=label, exact=True),
+def _only_visible(locator: Locator, description: str) -> Locator:
+    """从重复渲染的控件中取唯一可见项。
+
+    微信页面会为吸顶工具栏复制日期控件，因此 DOM 数量不能代表
+    实际可操作数量。
+    """
+
+    visible = [locator.nth(index) for index in range(locator.count()) if locator.nth(index).is_visible()]
+    if len(visible) != 1:
+        reason = "匹配到多个可见元素" if visible else "没有找到可见元素"
+        raise ExportReportError(f"{description}：{reason}，为避免误操作已停止")
+    return visible[0]
+
+
+def _visible_date_input(page: Page, placeholder: str) -> Locator:
+    return _only_visible(
+        page.get_by_placeholder(placeholder, exact=True),
+        f"{placeholder}输入框",
     )
-    for locator in candidates:
-        if locator.count() == 1 and locator.is_visible():
-            locator.fill(value)
-            locator.press("Enter")
-            return True
-    return False
+
+
+def _calendar_day(page: Page, target_date: date) -> Locator:
+    year = f"{target_date.year}年"
+    month = f"{target_date.month:02d}月"
+    day = str(target_date.day)
+    # 日期数字会在多个月份中重复；以可见面板的年、月标题限定具体日期。
+    locator = page.locator(
+        "xpath=//div[contains(@class, 'weui-desktop-picker__panel_day') "
+        f"and .//span[normalize-space()='{year}'] "
+        f"and .//span[normalize-space()='{month}']]"
+        f"//a[normalize-space()='{day}' "
+        "and not(contains(@class, 'weui-desktop-picker__disabled')) "
+        "and not(contains(@class, 'weui-desktop-picker__faded'))]"
+    )
+    return _only_visible(locator, f"{target_date.isoformat()}日期")
+
+
+def _select_calendar_date(page: Page, placeholder: str, target_date: date) -> None:
+    date_input = _visible_date_input(page, placeholder)
+    date_input.click()
+    try:
+        day = _calendar_day(page, target_date)
+    except ExportReportError as exc:
+        raise ExportReportError(
+            f"日历未显示 {target_date.isoformat()}；当前阶段仅支持页面已加载的可选日期"
+        ) from exc
+    day.click()
+    date_input.wait_for(state="visible", timeout=DATE_PICKER_TIMEOUT_MS)
 
 
 def select_report_date(page: Page, target_date: date) -> None:
-    """优先使用“昨日”，自定义日期仅操作有明确标签的输入框。"""
+    """默认使用真实快捷项“昨日”，自定义日期通过只读日历控件选择。"""
 
     if target_date == default_report_date():
         try:
@@ -171,48 +209,67 @@ def select_report_date(page: Page, target_date: date) -> None:
         except ExportReportError:
             LOGGER.info("页面没有独立的昨日选项，尝试带标签的日期输入框")
 
-    value = target_date.isoformat()
-    start_ok = _fill_labeled_date(page, "开始日期", value)
-    end_ok = _fill_labeled_date(page, "结束日期", value)
-    if not (start_ok and end_ok):
-        raise ExportReportError(
-            "未找到带“开始日期/结束日期”标签的控件；请不要手动点击导出，"
-            "先截图确认实际日期控件"
-        )
+    _select_calendar_date(page, "开始日期", target_date)
+    _select_calendar_date(page, "结束日期", target_date)
     LOGGER.info("已选择内容分析日期：%s", target_date)
 
 
-def _wait_for_direct_download(page: Page, action: Locator):
-    try:
-        with page.expect_download(timeout=8_000) as download_info:
-            action.click()
-        return download_info.value
-    except PlaywrightTimeoutError:
-        return None
-
-
 def _trigger_content_download(page: Page):
-    export_action = _named_action(
-        page,
-        ("导出数据", "导出报表", "导出"),
-        "内容分析导出按钮",
-    )
-    download = _wait_for_direct_download(page, export_action)
-    if download is not None:
-        return download
-
-    # 某些版本会先打开报表类型菜单，再点击具体类型才开始下载。
-    report_action = _named_action(
-        page,
-        ("内容分析数据", "内容分析报表", "导出 Excel", "导出全部数据"),
-        "内容分析报表类型",
+    log_page_actions(page)
+    # 真实页面中唯一的明细下载入口是链接“下载数据明细”。
+    export_action = _unique_visible(
+        (
+            page.get_by_role("link", name="下载数据明细", exact=True),
+            page.locator(
+                "xpath=//a[normalize-space()='下载数据明细' "
+                "and contains(@href, 'action=download_summary_tendency')]"
+            ),
+        ),
+        "内容分析下载链接",
     )
     try:
         with page.expect_download(timeout=DOWNLOAD_TIMEOUT_MS) as download_info:
-            report_action.click()
+            export_action.click()
         return download_info.value
     except PlaywrightTimeoutError as exc:
-        raise ExportReportError("点击内容分析报表后未检测到 Playwright 下载事件") from exc
+        raise ExportReportError("点击“下载数据明细”后未检测到 Playwright 下载事件") from exc
+
+
+def collect_page_actions(page: Page) -> dict[str, list[dict[str, str]]]:
+    """收集可见按钮、链接和输入框，便于页面变化时继续定位。"""
+
+    result: dict[str, list[dict[str, str]]] = {"buttons": [], "links": [], "inputs": []}
+    for role, key in (("button", "buttons"), ("link", "links")):
+        locator = page.get_by_role(role)
+        for index in range(locator.count()):
+            item = locator.nth(index)
+            if not item.is_visible():
+                continue
+            text = " ".join(item.inner_text().split())
+            result[key].append({"text": text})
+    inputs = page.locator("input")
+    for index in range(inputs.count()):
+        item = inputs.nth(index)
+        if item.is_visible():
+            result["inputs"].append({"placeholder": item.get_attribute("placeholder") or ""})
+    return result
+
+
+def log_page_actions(page: Page) -> dict[str, list[dict[str, str]]]:
+    actions = collect_page_actions(page)
+    button_texts = [item["text"] for item in actions["buttons"] if item["text"]]
+    LOGGER.info("当前页面所有可见按钮文本：%s", button_texts or "无文本按钮")
+    return actions
+
+
+def save_export_debug(page: Page, debug_dir: Path) -> None:
+    from collector.debug import save_debug_artifacts
+
+    save_debug_artifacts(page, debug_dir)
+    actions = collect_page_actions(page)
+    path = debug_dir / "buttons.json"
+    path.write_text(json.dumps(actions, ensure_ascii=False, indent=2), encoding="utf-8")
+    LOGGER.info("页面控件信息已保存：%s", path)
 
 
 def detect_excel_extension(path: Path) -> str:
@@ -246,34 +303,39 @@ def export_content_report(
     debug: bool = False,
     debug_dir: Path | None = None,
 ) -> ExportResult:
-    navigate_to_content_analysis(page, debug=debug, debug_dir=debug_dir)
-    select_report_date(page, target_date)
+    try:
+        navigate_to_content_analysis(page, debug=debug, debug_dir=debug_dir)
+        select_report_date(page, target_date)
 
-    output_dir.mkdir(parents=True, exist_ok=True)
-    download = _trigger_content_download(page)
-    suggested = (download.suggested_filename or "").lower()
-    suggested_extension = Path(suggested).suffix
-    if suggested_extension not in (".xls", ".xlsx"):
-        raise ExportReportError(f"微信返回了不支持的文件扩展名：{suggested_extension or '无'}")
+        output_dir.mkdir(parents=True, exist_ok=True)
+        download = _trigger_content_download(page)
+        suggested = (download.suggested_filename or "").lower()
+        suggested_extension = Path(suggested).suffix
+        if suggested_extension not in (".xls", ".xlsx"):
+            raise ExportReportError(f"微信返回了不支持的文件扩展名：{suggested_extension or '无'}")
 
-    temporary = output_dir / f".wechat_content_{target_date.isoformat()}{suggested_extension}.part"
-    destination = output_dir / f"wechat_content_{target_date.isoformat()}{suggested_extension}"
-    download.save_as(str(temporary))
-    failure = download.failure()
-    if failure:
-        temporary.unlink(missing_ok=True)
-        raise ExportReportError(f"微信内容分析报表下载失败：{failure}")
+        temporary = output_dir / f".wechat_content_{target_date.isoformat()}{suggested_extension}.part"
+        destination = output_dir / f"wechat_content_{target_date.isoformat()}{suggested_extension}"
+        download.save_as(str(temporary))
+        failure = download.failure()
+        if failure:
+            temporary.unlink(missing_ok=True)
+            raise ExportReportError(f"微信内容分析报表下载失败：{failure}")
 
-    detected_extension = detect_excel_extension(temporary)
-    if detected_extension != suggested_extension:
-        temporary.unlink(missing_ok=True)
-        raise ExportReportError("微信下载文件的扩展名与实际 Excel 格式不一致")
-    os.replace(temporary, destination)
-    result = validate_download(destination, target_date)
-    LOGGER.info(
-        "内容分析报表下载完成：%s（%s 字节，创建时间 %s）",
-        result.file_path,
-        result.size_bytes,
-        result.created_at.isoformat(),
-    )
-    return result
+        detected_extension = detect_excel_extension(temporary)
+        if detected_extension != suggested_extension:
+            temporary.unlink(missing_ok=True)
+            raise ExportReportError("微信下载文件的扩展名与实际 Excel 格式不一致")
+        os.replace(temporary, destination)
+        result = validate_download(destination, target_date)
+        LOGGER.info(
+            "内容分析报表下载完成：%s（%s 字节，创建时间 %s）",
+            result.file_path,
+            result.size_bytes,
+            result.created_at.isoformat(),
+        )
+        return result
+    except Exception:
+        if debug and debug_dir is not None:
+            save_export_debug(page, debug_dir)
+        raise
