@@ -5,12 +5,16 @@ from __future__ import annotations
 import os
 import time
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 import requests
+from dotenv import load_dotenv
 
 
 RETRYABLE_STATUS = {408, 429, 500, 502, 503, 504}
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+PROJECT_ENV_FILE = PROJECT_ROOT / ".env"
 
 
 @dataclass(frozen=True)
@@ -20,14 +24,21 @@ class SupabaseConfig:
 
     @classmethod
     def from_env(cls) -> "SupabaseConfig":
+        # 始终从项目根目录加载，不依赖启动命令时的当前目录。
+        load_dotenv(dotenv_path=PROJECT_ENV_FILE)
         url = os.getenv("SUPABASE_URL", "").strip().rstrip("/")
         key = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "").strip()
         if not url:
-            raise ValueError("缺少环境变量 SUPABASE_URL")
+            raise ValueError(
+                f"缺少环境变量 SUPABASE_URL；当前配置文件路径：{PROJECT_ENV_FILE}"
+            )
         if not url.startswith("https://"):
             raise ValueError("SUPABASE_URL 必须以 https:// 开头")
         if not key:
-            raise ValueError("缺少环境变量 SUPABASE_SERVICE_ROLE_KEY")
+            raise ValueError(
+                "缺少环境变量 SUPABASE_SERVICE_ROLE_KEY；"
+                f"当前配置文件路径：{PROJECT_ENV_FILE}"
+            )
         return cls(url=url, service_role_key=key)
 
 
