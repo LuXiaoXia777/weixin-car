@@ -10,7 +10,12 @@ from tempfile import TemporaryDirectory
 from types import SimpleNamespace
 import unittest
 
-from run_daily_report import DailyReportPipeline, SelectedXls, discover_latest_xls
+from run_daily_report import (
+    DailyReportPipeline,
+    SelectedXls,
+    build_argument_parser,
+    discover_latest_xls,
+)
 
 
 AI_RESULT = {
@@ -44,10 +49,12 @@ def report_payload() -> dict:
 class FakeRegistry:
     def __init__(self, already_sent: bool = False) -> None:
         self.sent = already_sent
+        self.checked: list[date] = []
         self.started: list[date] = []
         self.finished: list[tuple[str, str, str | None]] = []
 
     def already_sent(self, report_date: date) -> bool:
+        self.checked.append(report_date)
         return self.sent
 
     def start(self, report_date: date) -> str:
@@ -135,6 +142,44 @@ class DailyPipelineTests(unittest.TestCase):
         self.assertEqual(len(calls), 3)
         self.assertFalse(any("services.ai_analyzer" in command for command in calls))
         self.assertFalse(any("services.feishu_sender" in command for command in calls))
+
+    def test_force_ignores_duplicate_check_and_resends(self) -> None:
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            xls = root / "latest.xls"
+            xls.write_bytes(b"xls")
+            calls: list[list[str]] = []
+
+            def runner(command, *, cwd, capture_output=False):
+                calls.append(command)
+                if "services.analysis_service" in command:
+                    (root / "report.json").write_text(
+                        json.dumps(report_payload()), encoding="utf-8"
+                    )
+                stdout = json.dumps(AI_RESULT, ensure_ascii=False) if capture_output else ""
+                return subprocess.CompletedProcess(command, 0, stdout=stdout, stderr="")
+
+            registry = FakeRegistry(already_sent=True)
+            pipeline = DailyReportPipeline(
+                root,
+                command_runner=runner,
+                latest_xls_finder=lambda _: SelectedXls(xls, date(2026, 7, 16)),
+                registry_factory=lambda: registry,
+            )
+            result = pipeline.run(force=True)
+
+        self.assertEqual(result, {"status": "success", "date": "2026-07-16"})
+        self.assertEqual(registry.checked, [])
+        self.assertEqual(registry.started, [date(2026, 7, 16)])
+        self.assertTrue(any("services.ai_analyzer" in command for command in calls))
+        self.assertTrue(any("services.feishu_sender" in command for command in calls))
+        self.assertEqual(registry.finished, [("run-1", "success", None)])
+
+    def test_force_command_line_flag(self) -> None:
+        parser = build_argument_parser()
+
+        self.assertFalse(parser.parse_args([]).force)
+        self.assertTrue(parser.parse_args(["--force"]).force)
 
     def test_failure_stops_following_steps(self) -> None:
         with TemporaryDirectory() as directory:

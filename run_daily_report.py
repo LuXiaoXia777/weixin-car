@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import argparse
 import json
 import os
 import subprocess
@@ -165,7 +166,7 @@ class DailyReportPipeline:
             capture_output=capture_output,
         )
 
-    def run(self) -> dict[str, Any]:
+    def run(self, *, force: bool = False) -> dict[str, Any]:
         registry = None
         sync_run_id: str | None = None
         try:
@@ -196,9 +197,11 @@ class DailyReportPipeline:
             self._status(3, f"{report_date} 指标报告生成完成")
 
             registry = self.registry_factory()
-            if registry.already_sent(report_date):
+            if not force and registry.already_sent(report_date):
                 print(f"[跳过] {report_date} 运营日报已成功发送，未重复调用 AI 和飞书。")
                 return {"status": "skipped", "date": report_date.isoformat()}
+            if force:
+                print(f"[强制模式] 已忽略 {report_date} 的 sync_runs 防重检查。")
             sync_run_id = registry.start(report_date)
 
             self._status(4, "调用 DeepSeek 生成运营分析…")
@@ -244,10 +247,21 @@ class DailyReportPipeline:
             raise
 
 
-def main() -> None:
+def build_argument_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description="采集微信数据并生成飞书运营日报")
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="忽略 sync_runs 防重检查，重新执行 DeepSeek 分析并发送飞书日报",
+    )
+    return parser
+
+
+def main(argv: list[str] | None = None) -> None:
     # 统一从项目根目录读取本地密钥，子进程会继承这些环境变量。
+    args = build_argument_parser().parse_args(argv)
     load_dotenv(PROJECT_ENV_FILE)
-    DailyReportPipeline().run()
+    DailyReportPipeline().run(force=args.force)
 
 
 if __name__ == "__main__":
