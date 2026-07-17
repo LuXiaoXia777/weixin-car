@@ -1,4 +1,4 @@
-"""微信公众号后台本机半自动采集助手入口（第一阶段：登录后台）。"""
+"""微信公众号后台本机半自动采集助手入口（第二阶段：导出内容报表）。"""
 
 from __future__ import annotations
 
@@ -11,6 +11,7 @@ from pathlib import Path
 from playwright.sync_api import sync_playwright
 
 from collector.browser_config import BrowserConfig
+from collector.export_report import export_content_report, parse_report_date
 from collector.login import wait_for_manual_login
 from collector.wechat_browser import WechatBrowser
 
@@ -26,6 +27,10 @@ def parse_args() -> argparse.Namespace:
         type=int,
         default=300,
         help="等待扫码登录的秒数，默认 300",
+    )
+    parser.add_argument(
+        "--date",
+        help="内容分析报表日期，格式 YYYY-MM-DD；默认昨天",
     )
     return parser.parse_args()
 
@@ -44,6 +49,7 @@ def main() -> None:
     args = parse_args()
     if args.login_timeout <= 0:
         raise ValueError("--login-timeout 必须大于 0")
+    report_date = parse_report_date(args.date)
 
     config = BrowserConfig(PROJECT_ROOT, login_timeout_seconds=args.login_timeout)
     config.prepare_local_directories()
@@ -55,8 +61,10 @@ def main() -> None:
             page = browser.start()
             browser.open_login_page()
             wait_for_manual_login(page, config.login_timeout_seconds)
-            LOGGER.info("第一阶段完成：已进入微信公众号后台")
-            input("浏览器将保持打开。检查完成后按回车键退出：")
+            result = export_content_report(page, report_date, config.import_dir)
+            LOGGER.info("第二阶段完成：%s", result.file_path)
+            print(f"导出完成：{result.file_path}")
+            input("浏览器将保持打开。确认下载结果后按回车键退出：")
         except Exception:
             browser.save_failure_screenshot()
             LOGGER.exception("微信公众号后台登录助手运行失败")

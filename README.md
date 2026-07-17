@@ -184,9 +184,9 @@ git config core.hooksPath .githooks
 
 此后每次 `git commit` 成功都会自动推送当前分支。该功能不会自动执行 `git add`，提交前仍需确认暂存内容，避免误提交密钥或临时文件。
 
-## 微信公众号后台本机采集助手（第一阶段）
+## 微信公众号后台本机采集助手（第二阶段）
 
-第一阶段只负责打开有界面的专用 Chromium、复用本机登录状态，并等待用户扫码进入微信公众号后台。它不会导出数据、调用未公开接口或绕过验证码与微信安全验证。
+采集助手负责打开有界面的专用 Chromium、复用本机登录状态、等待用户扫码，并通过微信公众号后台可见控件导出内容分析 Excel。它不会调用未公开接口，也不会绕过验证码与微信安全验证。
 
 首次安装：
 
@@ -201,6 +201,14 @@ python -m playwright install chromium
 python collect_wechat_data.py
 ```
 
+默认导出昨天的内容分析报表，也可以指定日期：
+
+```bash
+python collect_wechat_data.py --date 2026-07-16
+```
+
+下载文件保存在 `data/import/`，文件名为 `wechat_content_YYYY-MM-DD.xls`；如果微信实际返回新版 `.xlsx`，程序会保留真实扩展名，绝不伪装文件格式。程序使用 Playwright 下载事件等待文件完成，并验证文件存在、大小、Excel 文件头和创建时间。
+
 第一次运行请在打开的浏览器中扫码登录。后续运行会优先复用项目目录下 `wechat-browser-profile/` 中的登录状态；状态失效时会再次提示扫码。该目录包含敏感登录信息，已经被 Git 忽略，不要复制、上传或分享。
 
 登录等待时间默认5分钟，可按需调整：
@@ -209,4 +217,4 @@ python collect_wechat_data.py
 python collect_wechat_data.py --login-timeout 600
 ```
 
-数据导出、Excel 导入及日报推送将在后续阶段接入，当前入口不会触发这些操作。
+Supabase 导入、DeepSeek 分析及飞书日报将在第三阶段接入，当前入口不会触发这些操作。
