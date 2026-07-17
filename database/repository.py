@@ -79,7 +79,12 @@ class SupabaseRepository:
             prefer="return=minimal",
         )
 
-    def upsert_articles(self, account_id: str, batch: ImportBatch) -> dict[str, str]:
+    def upsert_articles(
+        self,
+        account_id: str,
+        batch: ImportBatch,
+        collected_at: str,
+    ) -> dict[str, str]:
         payload = [
             {
                 "account_id": account_id,
@@ -91,6 +96,7 @@ class SupabaseRepository:
                 "publish_time": row.publish_time.isoformat(),
                 "category": row.category,
                 "data_source": "manual_import",
+                "collected_at": collected_at,
             }
             for row in batch.articles
         ]
@@ -109,7 +115,12 @@ class SupabaseRepository:
             raise RuntimeError("部分文章写入后未返回 ID，事务未能完整映射")
         return result
 
-    def upsert_article_stats(self, article_ids: dict[str, str], batch: ImportBatch) -> int:
+    def upsert_article_stats(
+        self,
+        article_ids: dict[str, str],
+        batch: ImportBatch,
+        collected_at: str,
+    ) -> int:
         payload = []
         for row in batch.articles:
             if not row.has_stats:
@@ -126,6 +137,7 @@ class SupabaseRepository:
                     "comments": row.comments,
                     "new_followers": row.new_followers,
                     "data_source": "manual_import",
+                    "collected_at": collected_at,
                     "imported_at": datetime.now(timezone.utc).isoformat(),
                 }
             )
@@ -139,7 +151,12 @@ class SupabaseRepository:
             )
         return len(payload)
 
-    def upsert_user_stats(self, account_id: str, batch: ImportBatch) -> int:
+    def upsert_user_stats(
+        self,
+        account_id: str,
+        batch: ImportBatch,
+        collected_at: str,
+    ) -> int:
         payload = [
             {
                 "account_id": account_id,
@@ -148,6 +165,7 @@ class SupabaseRepository:
                 "cancel_followers": row.cancel_followers,
                 "net_followers": row.net_followers,
                 "data_source": "manual_import",
+                "collected_at": collected_at,
                 "imported_at": datetime.now(timezone.utc).isoformat(),
             }
             for row in batch.user_stats
@@ -168,12 +186,17 @@ class SupabaseRepository:
             return {"status": "skipped", "rows_imported": 0, "reason": "文件已成功导入"}
 
         run_id = self.start_import(account_id, batch)
+        collected_at = datetime.now(timezone.utc).isoformat()
         imported = 0
         try:
-            article_ids = self.upsert_articles(account_id, batch) if batch.articles else {}
+            article_ids = (
+                self.upsert_articles(account_id, batch, collected_at)
+                if batch.articles
+                else {}
+            )
             imported += len(batch.articles)
-            self.upsert_article_stats(article_ids, batch)
-            imported += self.upsert_user_stats(account_id, batch)
+            self.upsert_article_stats(article_ids, batch, collected_at)
+            imported += self.upsert_user_stats(account_id, batch, collected_at)
             self.finish_import(run_id, "success", imported)
             return {"status": "success", "rows_imported": imported}
         except Exception as exc:

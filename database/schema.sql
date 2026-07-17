@@ -23,6 +23,7 @@ create table if not exists public.articles (
     category text,
     data_source text not null default 'manual_import'
         check (data_source in ('manual_import', 'wechat_api')),
+    collected_at timestamptz not null default now(),
     created_at timestamptz not null default now(),
     updated_at timestamptz not null default now(),
     unique (account_id, source_key)
@@ -41,6 +42,7 @@ create table if not exists public.article_stats (
     new_followers integer,
     data_source text not null default 'manual_import'
         check (data_source in ('manual_import', 'wechat_api')),
+    collected_at timestamptz not null default now(),
     imported_at timestamptz not null default now(),
     unique (article_id, stat_date)
 );
@@ -54,6 +56,7 @@ create table if not exists public.user_stats (
     net_followers integer,
     data_source text not null default 'manual_import'
         check (data_source in ('manual_import', 'wechat_api')),
+    collected_at timestamptz not null default now(),
     imported_at timestamptz not null default now(),
     unique (account_id, stat_date)
 );
@@ -68,6 +71,7 @@ create table if not exists public.account_content_stats (
     original_read_users integer check (original_read_users is null or original_read_users >= 0),
     data_source text not null default 'manual_import'
         check (data_source in ('manual_import', 'wechat_api')),
+    collected_at timestamptz not null default now(),
     created_at timestamptz not null default now(),
     unique (account_id, stat_date)
 );
@@ -82,6 +86,7 @@ create table if not exists public.article_channels (
         check (read_percent is null or (read_percent >= 0 and read_percent <= 1)),
     data_source text not null default 'manual_import'
         check (data_source in ('manual_import', 'wechat_api')),
+    collected_at timestamptz not null default now(),
     created_at timestamptz not null default now(),
     unique (article_id, stat_date, channel)
 );
@@ -96,6 +101,7 @@ create table if not exists public.account_daily_stats (
     publish_count integer check (publish_count is null or publish_count >= 0),
     data_source text not null default 'manual_import'
         check (data_source in ('manual_import', 'wechat_api')),
+    collected_at timestamptz not null default now(),
     created_at timestamptz not null default now(),
     unique (account_id, stat_date)
 );
@@ -110,6 +116,7 @@ create table if not exists public.article_channel_stats (
     stat_date date not null,
     data_source text not null default 'manual_import'
         check (data_source in ('manual_import', 'wechat_api')),
+    collected_at timestamptz not null default now(),
     created_at timestamptz not null default now(),
     unique (article_id, channel, stat_date)
 );
@@ -158,6 +165,10 @@ create index if not exists idx_article_channel_stats_article_date
     on public.article_channel_stats(article_id, stat_date desc);
 create index if not exists idx_article_channel_stats_channel
     on public.article_channel_stats(channel);
+create index if not exists idx_account_daily_stats_latest
+    on public.account_daily_stats(account_id, stat_date desc, collected_at desc);
+create index if not exists idx_article_stats_latest
+    on public.article_stats(stat_date desc, collected_at desc);
 
 create or replace function public.set_updated_at()
 returns trigger language plpgsql as $$

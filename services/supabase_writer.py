@@ -92,7 +92,12 @@ class SupabaseWechatWriter:
             prefer="return=minimal",
         )
 
-    def _write_articles(self, account_id: str, batch: WechatXlsBatch) -> dict[str, str]:
+    def _write_articles(
+        self,
+        account_id: str,
+        batch: WechatXlsBatch,
+        collected_at: str,
+    ) -> dict[str, str]:
         payload = [
             {
                 "account_id": account_id,
@@ -103,6 +108,7 @@ class SupabaseWechatWriter:
                 "digest": None,
                 "category": None,
                 "data_source": "manual_import",
+                "collected_at": collected_at,
             }
             for row in batch.articles
         ]
@@ -116,9 +122,10 @@ class SupabaseWechatWriter:
         account_id = self._account_id(account_name)
         # 真实 .xls 允许重复导入，以 upsert 覆盖同日数据。
         run_id = self._start_import(account_id, batch)
+        collected_at = datetime.now(timezone.utc).isoformat()
         counts = {"articles": 0, "article_stats": 0, "account_daily_stats": 0, "article_channel_stats": 0}
         try:
-            article_ids = self._write_articles(account_id, batch)
+            article_ids = self._write_articles(account_id, batch, collected_at)
             counts["articles"] = len(batch.articles)
 
             article_stats = [
@@ -133,6 +140,7 @@ class SupabaseWechatWriter:
                     "comments": None,
                     "new_followers": None,
                     "data_source": "manual_import",
+                    "collected_at": collected_at,
                     "imported_at": datetime.now(timezone.utc).isoformat(),
                 }
                 for row in batch.article_totals
@@ -149,6 +157,7 @@ class SupabaseWechatWriter:
                     "favorites": row.favorites,
                     "publish_count": row.publish_count,
                     "data_source": "manual_import",
+                    "collected_at": collected_at,
                 }
                 for row in batch.account_daily_stats
             ]
@@ -163,6 +172,7 @@ class SupabaseWechatWriter:
                     "read_users": row.read_users,
                     "read_percent": row.read_percent,
                     "data_source": "manual_import",
+                    "collected_at": collected_at,
                 }
                 for row in batch.article_channel_stats
             ]
