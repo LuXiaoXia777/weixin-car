@@ -45,22 +45,44 @@ class ExportReportTests(unittest.TestCase):
             with self.assertRaises(ExportReportError):
                 validate_download(path, date(2026, 7, 16))
 
-    @patch("collector.export_report._named_action")
-    def test_navigation_expands_data_analysis_before_content(self, named_action_mock):
+    @patch("collector.export_report._data_analysis_toggle")
+    @patch("collector.export_report._content_analysis_link")
+    @patch("collector.export_report._content_analysis_heading")
+    def test_navigation_expands_data_analysis_before_content(
+        self,
+        heading_mock,
+        content_link_mock,
+        data_toggle_mock,
+    ):
         page = MagicMock()
-        content_text = MagicMock()
-        content_text.count.return_value = 0
-        page.get_by_text.return_value = content_text
+        heading = MagicMock()
+        heading.count.return_value = 0
+        heading.wait_for.side_effect = [Exception("not loaded"), None]
+        heading_mock.return_value = heading
         data_action = MagicMock()
         content_action = MagicMock()
-        named_action_mock.side_effect = [data_action, content_action]
+        data_toggle_mock.return_value = data_action
+        content_link_mock.side_effect = [ExportReportError("collapsed"), content_action]
+
+        from collector.export_report import navigate_to_content_analysis
+
+        with patch("collector.export_report.PlaywrightTimeoutError", Exception):
+            navigate_to_content_analysis(page)
+        data_action.click.assert_called_once_with()
+        content_action.click.assert_called_once_with()
+
+    @patch("collector.export_report._content_analysis_heading")
+    def test_navigation_does_nothing_when_content_page_is_loaded(self, heading_mock):
+        page = MagicMock()
+        heading = MagicMock()
+        heading.count.return_value = 1
+        heading.is_visible.return_value = True
+        heading_mock.return_value = heading
 
         from collector.export_report import navigate_to_content_analysis
 
         navigate_to_content_analysis(page)
-        data_action.click.assert_called_once_with()
-        content_text.wait_for.assert_called_once_with(state="visible", timeout=8_000)
-        content_action.click.assert_called_once_with()
+        page.get_by_text.assert_not_called()
 
     def test_debug_artifacts_save_screenshot_and_html(self):
         with TemporaryDirectory() as temporary:

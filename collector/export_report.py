@@ -70,6 +70,34 @@ def _named_action(page: Page, names: tuple[str, ...], description: str) -> Locat
     return _unique_visible(candidates, description)
 
 
+def _content_analysis_heading(page: Page) -> Locator:
+    """真实页面的主内容使用唯一 h1“内容分析”标识加载完成。"""
+
+    return page.get_by_role("heading", name="内容分析", exact=True)
+
+
+def _content_analysis_link(page: Page) -> Locator:
+    """真实侧栏使用 <a title="内容分析">，role=link 且名称唯一。"""
+
+    candidates = (
+        page.get_by_role("link", name="内容分析", exact=True),
+        page.locator(
+            'xpath=//a[@title="内容分析" and contains(@href, "/misc/appmsganalysis")]'
+        ),
+    )
+    return _unique_visible(candidates, "内容分析菜单")
+
+
+def _data_analysis_toggle(page: Page) -> Locator:
+    """真实侧栏父菜单是带 title 的 span，不是 link/button。"""
+
+    candidates = (
+        page.get_by_text("数据分析", exact=True),
+        page.locator('xpath=//span[@title="数据分析" and normalize-space(.)="数据分析"]'),
+    )
+    return _unique_visible(candidates, "数据分析菜单")
+
+
 def navigate_to_content_analysis(
     page: Page,
     *,
@@ -78,12 +106,28 @@ def navigate_to_content_analysis(
 ) -> None:
     """只通过可见文本和语义角色进入数据分析、内容分析。"""
 
-    if page.get_by_text("内容分析", exact=True).count() == 0:
-        data_analysis = _named_action(page, ("数据分析", "数据与分析"), "数据分析菜单")
+    heading = _content_analysis_heading(page)
+    if heading.count() == 1 and heading.is_visible():
+        LOGGER.info("当前已位于内容分析页面")
+        return
+
+    try:
+        content_analysis = _content_analysis_link(page)
+    except ExportReportError:
+        data_analysis = _data_analysis_toggle(page)
         data_analysis.click()
+
+        # 微信可能在展开父菜单时直接加载默认的“内容分析”页面。
         try:
-            page.get_by_text("内容分析", exact=True).wait_for(state="visible", timeout=8_000)
-        except PlaywrightTimeoutError as exc:
+            heading.wait_for(state="visible", timeout=3_000)
+            LOGGER.info("数据分析已直接打开内容分析页面")
+            return
+        except PlaywrightTimeoutError:
+            pass
+
+        try:
+            content_analysis = _content_analysis_link(page)
+        except ExportReportError as exc:
             log_visible_menu_texts(page)
             if debug and debug_dir is not None:
                 manual_content_analysis_handoff(page, debug_dir)
@@ -93,17 +137,11 @@ def navigate_to_content_analysis(
                 "点击数据分析后没有出现内容分析子菜单；页面结构可能已变化"
             ) from exc
 
-    try:
-        content_analysis = _named_action(page, ("内容分析",), "内容分析菜单")
-    except ExportReportError:
-        log_visible_menu_texts(page)
-        if debug and debug_dir is not None:
-            manual_content_analysis_handoff(page, debug_dir)
-            LOGGER.info("已由用户手动进入内容分析页面")
-            return
-        raise
     content_analysis.click()
-    page.wait_for_load_state("domcontentloaded")
+    try:
+        heading.wait_for(state="visible", timeout=15_000)
+    except PlaywrightTimeoutError as exc:
+        raise ExportReportError("点击内容分析后，页面主标题未加载") from exc
     LOGGER.info("已进入内容分析页面")
 
 
