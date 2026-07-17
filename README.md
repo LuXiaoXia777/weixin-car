@@ -183,3 +183,30 @@ git config core.hooksPath .githooks
 ```
 
 此后每次 `git commit` 成功都会自动推送当前分支。该功能不会自动执行 `git add`，提交前仍需确认暂存内容，避免误提交密钥或临时文件。
+
+## 微信公众号后台本机采集助手（第一阶段）
+
+第一阶段只负责打开有界面的专用 Chromium、复用本机登录状态，并等待用户扫码进入微信公众号后台。它不会导出数据、调用未公开接口或绕过验证码与微信安全验证。
+
+首次安装：
+
+```bash
+python -m pip install -r requirements.txt
+python -m playwright install chromium
+```
+
+启动：
+
+```bash
+python collect_wechat_data.py
+```
+
+第一次运行请在打开的浏览器中扫码登录。后续运行会优先复用项目目录下 `wechat-browser-profile/` 中的登录状态；状态失效时会再次提示扫码。该目录包含敏感登录信息，已经被 Git 忽略，不要复制、上传或分享。
+
+登录等待时间默认5分钟，可按需调整：
+
+```bash
+python collect_wechat_data.py --login-timeout 600
+```
+
+数据导出、Excel 导入及日报推送将在后续阶段接入，当前入口不会触发这些操作。
