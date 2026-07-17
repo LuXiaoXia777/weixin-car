@@ -33,8 +33,9 @@ def run(*, dry_run: bool = False) -> None:
     LOGGER.info("已读取 %s 条最近7天文章数据", len(seven_days))
     analysis = analyze_articles(
         seven_days,
-        api_key=settings.openai_api_key,
-        model=settings.openai_model,
+        api_key=settings.deepseek_api_key,
+        model=settings.deepseek_model,
+        base_url=settings.deepseek_base_url,
         prompt_file=settings.prompt_file,
     )
     best = next(

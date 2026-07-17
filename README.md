@@ -1,12 +1,12 @@
 # AI 公众号数据分析机器人
 
-每天读取最近 7 天公众号文章 CSV 数据，调用 OpenAI 生成汽车内容运营分析，并通过飞书自定义机器人推送日报。
+每天读取最近 7 天公众号文章 CSV 数据，调用 DeepSeek 生成汽车内容运营分析，并通过飞书自定义机器人推送日报。
 
 ## 工作方式
 
 1. GitHub Actions 每天北京时间 09:00 启动。
 2. 程序读取 `data/articles.csv` 中截至最新日期的最近 7 天数据。
-3. OpenAI 分析标题吸引力、购买心理、内容趋势和次日选题。
+3. DeepSeek 分析标题吸引力、购买心理、内容趋势和次日选题。
 4. 飞书自定义机器人将结果发送到指定群聊。
 
 第一阶段的 CSV 不会自动更新。要得到新的日报，需要在仓库中追加或更新最新一天的数据。
@@ -28,7 +28,7 @@
 
 创建两个 Secret：
 
-- `OPENAI_API_KEY`：OpenAI API 密钥。
+- `DEEPSEEK_API_KEY`：DeepSeek API 密钥。
 - `FEISHU_WEBHOOK_URL`：飞书自定义机器人的完整 Webhook 地址。
 
 不要把密钥写入代码、CSV、Issue 或 Actions 日志。
@@ -51,11 +51,19 @@ Webhook 相当于机器人密码，不要发送给其他人。
 python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install -r requirements.txt
-export OPENAI_API_KEY="你的 OpenAI API 密钥"
+export DEEPSEEK_API_KEY="你的 DeepSeek API 密钥"
 python main.py --dry-run
 ```
 
-`--dry-run` 会调用 OpenAI 并在终端显示日报，但不会发送飞书消息。
+`--dry-run` 会调用 DeepSeek 并在终端显示日报，但不会发送飞书消息。
+
+只测试 DeepSeek API 连接和模拟数据分析：
+
+```bash
+python test_ai.py
+```
+
+成功时会输出 `DeepSeek API连接成功` 和一段 JSON 分析结果。
 
 测试真实飞书推送：
 
@@ -94,7 +102,7 @@ date,title,category,views,likes,shares,comments,new_followers
 
 ## 可选配置
 
-可在 GitHub Actions 或本地环境中设置 `OPENAI_MODEL`。默认使用 `gpt-5.6-luna`，用于控制个人项目成本。
+可在 GitHub Actions 或本地环境中设置 `DEEPSEEK_MODEL`。按当前项目要求默认使用 `deepseek-chat`。API 地址默认为 `https://api.deepseek.com`，也可通过 `DEEPSEEK_BASE_URL` 覆盖。
 
 ## 后续扩展位置
 
