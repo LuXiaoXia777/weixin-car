@@ -81,6 +81,6 @@ def generate_top_articles_chart(report: dict[str, Any], output_path: Path) -> Pa
 
 def generate_report_charts(report: dict[str, Any], output_dir: Path) -> dict[str, Path]:
     return {
-        "trend": generate_trend_chart(report, output_dir / "daily_trend.png"),
-        "top5": generate_top_articles_chart(report, output_dir / "top5_articles.png"),
+        "trend": generate_trend_chart(report, output_dir / "views_trend.png"),
+        "top5": generate_top_articles_chart(report, output_dir / "top_articles.png"),
     }

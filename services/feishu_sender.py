@@ -14,6 +14,7 @@ from pydantic import ValidationError
 
 from config import Settings
 from services.ai_analyzer import AIAnalysisResult, load_report
+from services.feishu_image_uploader import FeishuImageUploader
 from services.report_visualizer import generate_report_charts
 
 
@@ -196,33 +197,6 @@ def build_card(
     }
 
 
-def upload_card_image(app_id: str, app_secret: str, image_path: Path, *, timeout: int = 30) -> str:
-    """使用飞书应用凭证上传卡片图片并返回 image_key。"""
-    token_response = requests.post(
-        "https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal",
-        json={"app_id": app_id, "app_secret": app_secret},
-        timeout=timeout,
-    )
-    token_response.raise_for_status()
-    token_payload = token_response.json()
-    if token_payload.get("code") != 0 or not token_payload.get("tenant_access_token"):
-        raise RuntimeError(f"获取飞书 tenant_access_token 失败：{token_payload.get('msg', '未知错误')}")
-    with image_path.open("rb") as image_file:
-        response = requests.post(
-            "https://open.feishu.cn/open-apis/im/v1/images",
-            headers={"Authorization": f"Bearer {token_payload['tenant_access_token']}"},
-            data={"image_type": "message"},
-            files={"image": (image_path.name, image_file, "image/png")},
-            timeout=timeout,
-        )
-    response.raise_for_status()
-    payload = response.json()
-    image_key = (payload.get("data") or {}).get("image_key")
-    if payload.get("code") != 0 or not image_key:
-        raise RuntimeError(f"上传飞书卡片图片失败：{payload.get('msg', '未知错误')}")
-    return image_key
-
-
 def send_card(
     webhook_url: str,
     card_payload: dict[str, Any],
@@ -289,14 +263,15 @@ def main() -> None:
     charts = generate_report_charts(report, Path("data/charts"))
     image_keys: dict[str, str] = {}
     if settings.feishu_app_id and settings.feishu_app_secret:
-        image_keys = {
-            name: upload_card_image(
-                settings.feishu_app_id,
-                settings.feishu_app_secret,
-                path,
+        uploader = FeishuImageUploader(
+            settings.feishu_app_id,
+            settings.feishu_app_secret,
+        )
+        image_keys = uploader.upload_images(charts)
+        if len(image_keys) < len(charts):
+            LOGGER.warning(
+                "部分或全部飞书图片上传失败，缺失图表将自动使用文字版"
             )
-            for name, path in charts.items()
-        }
     else:
         LOGGER.warning(
             "未配置 FEISHU_APP_ID/FEISHU_APP_SECRET，本地图表已生成，"
