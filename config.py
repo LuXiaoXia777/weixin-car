@@ -14,7 +14,7 @@ BASE_DIR = Path(__file__).resolve().parent
 class Settings:
     deepseek_api_key: str
     feishu_webhook_url: str
-    deepseek_model: str = "deepseek-chat"
+    deepseek_model: str = "deepseek-v4-flash"
     deepseek_base_url: str = "https://api.deepseek.com"
     articles_csv: Path = BASE_DIR / "data" / "articles.csv"
     prompt_file: Path = BASE_DIR / "prompts" / "analysis_prompt.txt"
@@ -30,7 +30,7 @@ class Settings:
         return cls(
             deepseek_api_key=api_key,
             feishu_webhook_url=webhook,
-            deepseek_model=os.getenv("DEEPSEEK_MODEL", "deepseek-chat").strip(),
+            deepseek_model=os.getenv("DEEPSEEK_MODEL", "deepseek-v4-flash").strip(),
             deepseek_base_url=os.getenv(
                 "DEEPSEEK_BASE_URL", "https://api.deepseek.com"
             ).rstrip("/"),

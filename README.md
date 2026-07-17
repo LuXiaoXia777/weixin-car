@@ -102,7 +102,7 @@ date,title,category,views,likes,shares,comments,new_followers
 
 ## 可选配置
 
-可在 GitHub Actions 或本地环境中设置 `DEEPSEEK_MODEL`。按当前项目要求默认使用 `deepseek-chat`。API 地址默认为 `https://api.deepseek.com`，也可通过 `DEEPSEEK_BASE_URL` 覆盖。
+模型通过 GitHub Repository Variable `DEEPSEEK_MODEL` 控制，当前默认使用 `deepseek-v4-flash`。进入 **Settings → Secrets and variables → Actions → Variables** 即可更换模型，无需修改代码。API 地址默认为 `https://api.deepseek.com`，也可通过 `DEEPSEEK_BASE_URL` 覆盖。
 
 ## 后续扩展位置
 
