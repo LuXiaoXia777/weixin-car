@@ -1,6 +1,24 @@
 # AI 公众号数据分析机器人
 
-每天读取最近 7 天公众号文章 CSV 数据，调用 DeepSeek 生成汽车内容运营分析，并通过飞书自定义机器人推送日报。
+每天读取最近 7 天公众号文章数据，调用 DeepSeek 生成汽车内容运营分析，并通过飞书自定义机器人推送日报。
+
+## V1 数据架构
+
+生产数据将采用以下流程，不使用微信云托管，也不使用 SQLite：
+
+```text
+微信公众平台后台导出 Excel/CSV
+          ↓
+Python 导入服务
+          ↓
+Supabase PostgreSQL（唯一生产数据库）
+          ↓
+GitHub Actions 每日分析
+          ↓
+DeepSeek → 飞书 Interactive Card
+```
+
+当前提交完成第一阶段：Supabase 数据库结构、`.xlsx`/`.csv` 解析、校验和幂等导入。现有 CSV 日报流程暂时保留，下一阶段再把每日分析的数据源切换到 Supabase。
 
 ## 工作方式
 
@@ -101,6 +119,49 @@ date,title,category,views,likes,shares,comments,new_followers
 ```
 
 日期格式必须是 `YYYY-MM-DD`，数值列只能填写整数。当前 MVP 以 CSV 中最新日期作为日报日期，并分析截至该日的最近 7 个自然日。
+
+## Supabase 数据库与后台导出文件导入
+
+### 1. 创建数据库表
+
+1. 在 Supabase 新建项目。
+2. 打开 **SQL Editor → New query**。
+3. 复制并执行 `database/schema.sql` 的全部内容。
+
+脚本会创建公众号、文章、文章每日数据、用户每日数据和导入记录等表。表已启用 RLS，并且没有向匿名用户开放策略。`service_role` 密钥权限很高，只能保存在本机环境变量或 GitHub Secrets 中，不能放进仓库或前端代码。
+
+### 2. 配置本地环境变量
+
+在 Supabase 项目的 **Project Settings → API** 中取得项目地址和 `service_role` 密钥，然后在当前终端设置：
+
+```bash
+export SUPABASE_URL="https://你的项目.supabase.co"
+export SUPABASE_SERVICE_ROLE_KEY="你的 service_role 密钥"
+```
+
+未来在 GitHub Actions 中使用时，创建同名 GitHub Secrets：
+
+- `SUPABASE_URL`
+- `SUPABASE_SERVICE_ROLE_KEY`
+
+### 3. 先校验，再导入
+
+导入服务同时支持 `.xlsx` 和 `.csv`。建议把真实导出文件放入本机 `data/imports/`，该目录已被 Git 忽略：
+
+```bash
+python import_wechat_data.py data/imports/微信数据.xlsx --account-name 车事人话 --dry-run
+python import_wechat_data.py data/imports/微信数据.xlsx --account-name 车事人话
+```
+
+CSV 用法相同：
+
+```bash
+python import_wechat_data.py data/imports/微信数据.csv --account-name 车事人话
+```
+
+导入程序会识别常见中英文列名，例如文章标题、发布时间、数据日期、阅读量、点赞、在看、分享、留言、新增关注、取消关注和净增关注。一个 XLSX 可以包含文章数据与用户数据等多个工作表。缺失字段会以数据库 `NULL` 保存，不会编造为 0；相同文件重复执行会被跳过，文章及每日数据也会按唯一键更新而不是重复新增。
+
+如果微信后台导出的真实表头未被识别，请保留原始表头并补充映射，不要手工改造或补造数据。
 
 ## 可选配置
 
