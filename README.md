@@ -1,0 +1,104 @@
+# AI 公众号数据分析机器人
+
+每天读取最近 7 天公众号文章 CSV 数据，调用 OpenAI 生成汽车内容运营分析，并通过飞书自定义机器人推送日报。
+
+## 工作方式
+
+1. GitHub Actions 每天北京时间 09:00 启动。
+2. 程序读取 `data/articles.csv` 中截至最新日期的最近 7 天数据。
+3. OpenAI 分析标题吸引力、购买心理、内容趋势和次日选题。
+4. 飞书自定义机器人将结果发送到指定群聊。
+
+第一阶段的 CSV 不会自动更新。要得到新的日报，需要在仓库中追加或更新最新一天的数据。
+
+## 1. 创建 GitHub 仓库
+
+1. 登录 GitHub，点击右上角 `+`，选择 **New repository**。
+2. 仓库名填写 `wechat-ai-assistant`。
+3. 建议选择 **Private**，不要勾选自动创建 README。
+4. 创建后，按照 GitHub 页面提示把本项目上传到仓库。
+
+如果使用 GitHub Desktop：选择 **Add Existing Repository**，指向本项目文件夹；若提示它还不是仓库，选择创建仓库，然后点击 **Publish repository**。
+
+## 2. 添加 GitHub Secrets
+
+打开仓库，依次进入：
+
+**Settings → Secrets and variables → Actions → New repository secret**
+
+创建两个 Secret：
+
+- `OPENAI_API_KEY`：OpenAI API 密钥。
+- `FEISHU_WEBHOOK_URL`：飞书自定义机器人的完整 Webhook 地址。
+
+不要把密钥写入代码、CSV、Issue 或 Actions 日志。
+
+## 3. 配置飞书机器人
+
+1. 打开接收日报的飞书群。
+2. 进入 **群设置 → 群机器人 → 添加机器人 → 自定义机器人**。
+3. 设置机器人名称，例如“车事人话数据助手”。
+4. 安全设置可先选择“自定义关键词”，填写 `车事人话`。本项目卡片标题包含该关键词。
+5. 复制 Webhook 地址，并保存到 GitHub Secret `FEISHU_WEBHOOK_URL`。
+
+Webhook 相当于机器人密码，不要发送给其他人。
+
+## 4. 本地测试
+
+需要 Python 3.11+。在本项目目录执行：
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install -r requirements.txt
+export OPENAI_API_KEY="你的 OpenAI API 密钥"
+python main.py --dry-run
+```
+
+`--dry-run` 会调用 OpenAI 并在终端显示日报，但不会发送飞书消息。
+
+测试真实飞书推送：
+
+```bash
+export FEISHU_WEBHOOK_URL="你的飞书 Webhook"
+python main.py
+```
+
+退出终端后，上述 `export` 设置会失效，不会写入项目文件。
+
+## 5. 在 GitHub 手动测试
+
+1. 打开仓库的 **Actions** 页面。
+2. 左侧选择 **Daily WeChat AI Report**。
+3. 点击 **Run workflow → Run workflow**。
+4. 等待任务变为绿色对勾。
+5. 检查飞书群是否收到“车事人话公众号日报”。
+
+若任务显示红色叉号，点击该次运行，再点击 **Generate and send report** 查看错误日志。不要在日志或截图中暴露密钥。
+
+## 6. 每日自动运行
+
+工作流文件位于 `.github/workflows/daily_report.yml`，定时表达式为 `0 1 * * *`。GitHub 使用 UTC，因此对应北京时间每天 09:00。GitHub 的定时任务可能因平台繁忙延迟数分钟，不保证精确到秒。
+
+定时工作流只会运行默认分支上的版本。请确保代码已经推送到默认分支，并在 Actions 页面启用了工作流。
+
+## CSV 数据格式
+
+编辑 `data/articles.csv`，字段为：
+
+```text
+date,title,category,views,likes,shares,comments,new_followers
+```
+
+日期格式必须是 `YYYY-MM-DD`，数值列只能填写整数。当前 MVP 以 CSV 中最新日期作为日报日期，并分析截至该日的最近 7 个自然日。
+
+## 可选配置
+
+可在 GitHub Actions 或本地环境中设置 `OPENAI_MODEL`。默认使用 `gpt-5.6-luna`，用于控制个人项目成本。
+
+## 后续扩展位置
+
+- 微信公众号 API：在 `services/data_loader.py` 增加新的数据源实现。
+- 飞书多维表格与历史存储：新增独立 storage service。
+- 周报/月报：在数据加载后增加报告周期参数。
+- 自动选题库：保存 `suggestions` 到新的数据文件或外部存储。
