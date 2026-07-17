@@ -8,8 +8,9 @@ import sys
 
 from config import Settings
 from services.ai_analysis import analyze_articles
-from services.data_loader import daily_totals, latest_seven_days, load_articles
+from services.data_loader import latest_seven_days, load_articles
 from services.feishu import build_report, send_report
+from services.metrics import build_report_metrics
 
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)s | %(message)s")
@@ -26,9 +27,7 @@ def run(*, dry_run: bool = False) -> None:
     settings = Settings.from_env(require_feishu=not dry_run)
     articles = load_articles(settings.articles_csv)
     seven_days = latest_seven_days(articles)
-    report_date = max(article.date for article in seven_days)
-    report_articles = [article for article in seven_days if article.date == report_date]
-    totals = daily_totals(seven_days, report_date)
+    metrics = build_report_metrics(seven_days)
 
     LOGGER.info("已读取 %s 条最近7天文章数据", len(seven_days))
     analysis = analyze_articles(
@@ -37,19 +36,9 @@ def run(*, dry_run: bool = False) -> None:
         model=settings.deepseek_model,
         base_url=settings.deepseek_base_url,
         prompt_file=settings.prompt_file,
+        metrics=metrics,
     )
-    best = next(
-        (article for article in report_articles if article.title == analysis.best_article),
-        max(
-            report_articles,
-            key=lambda item: (
-                item.views,
-                item.likes + item.shares + item.comments,
-                item.new_followers,
-            ),
-        ),
-    )
-    markdown = build_report(report_date, totals, best, analysis)
+    markdown = build_report(metrics, analysis)
 
     if dry_run:
         print(markdown)
