@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import mimetypes
 from pathlib import Path
 from typing import Mapping
 
@@ -12,6 +13,13 @@ import requests
 LOGGER = logging.getLogger(__name__)
 TOKEN_URL = "https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal"
 IMAGE_URL = "https://open.feishu.cn/open-apis/im/v1/images"
+IMAGE_TYPE = "message"
+
+
+def _response_body(response: requests.Response) -> str:
+    """返回可用于排查的飞书响应体；不包含请求头或 token。"""
+    body = (response.text or "").strip()
+    return body if body else "<empty>"
 
 
 class FeishuImageUploader:
@@ -66,21 +74,50 @@ class FeishuImageUploader:
         if path.stat().st_size <= 0:
             raise ValueError(f"待上传图片为空：{path}")
 
+        mime_type = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
+        if not mime_type.startswith("image/"):
+            raise ValueError(f"待上传文件不是支持的图片类型：{path.name} ({mime_type})")
+
+        file_size = path.stat().st_size
+        LOGGER.info(
+            "准备上传飞书图片：image_type=%s, file=%s, size=%d bytes, mime_type=%s",
+            IMAGE_TYPE,
+            path.name,
+            file_size,
+            mime_type,
+        )
+
         token = self.get_tenant_access_token()
         try:
             with path.open("rb") as image_file:
+                # 不手动设置 Content-Type；requests 会为 multipart/form-data 生成正确 boundary。
                 response = self.session.post(
                     IMAGE_URL,
                     headers={"Authorization": f"Bearer {token}"},
-                    data={"image_type": "message"},
-                    files={"image": (path.name, image_file, "image/png")},
+                    data={"image_type": IMAGE_TYPE},
+                    files={"image": (path.name, image_file, mime_type)},
                     timeout=self.timeout,
                 )
-            response.raise_for_status()
-            payload = response.json()
-        except (requests.RequestException, ValueError) as exc:
-            LOGGER.error("飞书图片上传失败：file=%s, error=%s", path.name, exc)
+        except requests.RequestException as exc:
+            LOGGER.error("飞书图片上传请求失败：file=%s, error=%s", path.name, exc)
             raise RuntimeError(f"飞书图片上传失败：{path.name}：{exc}") from exc
+
+        body = _response_body(response)
+        LOGGER.info("飞书图片上传返回：file=%s, status=%s, body=%s", path.name, response.status_code, body)
+        try:
+            response.raise_for_status()
+        except requests.HTTPError as exc:
+            permission_hint = ""
+            if '"code":99991672' in body.replace(" ", ""):
+                permission_hint = "；请在飞书开放平台开通 im:resource:upload 应用身份权限并发布新版本"
+            raise RuntimeError(
+                f"飞书图片上传失败：{path.name}：HTTP {response.status_code}{permission_hint}：{body}"
+            ) from exc
+
+        try:
+            payload = response.json()
+        except ValueError as exc:
+            raise RuntimeError(f"飞书图片上传失败：{path.name}：返回不是有效 JSON：{body}") from exc
 
         image_key = (payload.get("data") or {}).get("image_key")
         if payload.get("code") != 0 or not image_key:

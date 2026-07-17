@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
@@ -16,6 +17,7 @@ def response(payload: dict, *, status_code: int = 200) -> Mock:
     item = Mock(status_code=status_code)
     item.raise_for_status.return_value = None
     item.json.return_value = payload
+    item.text = json.dumps(payload, ensure_ascii=False)
     return item
 
 
@@ -54,6 +56,13 @@ class FeishuImageUploaderTests(unittest.TestCase):
         upload_call = self.session.post.call_args_list[1]
         self.assertEqual(upload_call.kwargs["data"], {"image_type": "message"})
         self.assertIn("image", upload_call.kwargs["files"])
+        filename, _, mime_type = upload_call.kwargs["files"]["image"]
+        self.assertEqual(filename, "views_trend.png")
+        self.assertEqual(mime_type, "image/png")
+        self.assertNotIn("Content-Type", upload_call.kwargs["headers"])
+        self.assertTrue(any("size=12 bytes" in line for line in logs.output))
+        self.assertTrue(any("mime_type=image/png" in line for line in logs.output))
+        self.assertTrue(any("上传返回" in line and '"code": 0' in line for line in logs.output))
         self.assertTrue(any("image_key=img_test_key" in line for line in logs.output))
 
     def test_upload_images_returns_both_keys_and_reuses_token(self) -> None:
@@ -74,8 +83,10 @@ class FeishuImageUploaderTests(unittest.TestCase):
 
     def test_upload_failure_degrades_to_empty_keys(self) -> None:
         token_response = response({"code": 0, "tenant_access_token": "tenant-token"})
-        failed_upload = response({})
-        failed_upload.raise_for_status.side_effect = requests.HTTPError("403 forbidden")
+        failed_upload = response(
+            {"code": 234001, "msg": "Invalid request parameter"}, status_code=400
+        )
+        failed_upload.raise_for_status.side_effect = requests.HTTPError("400 bad request")
         self.session.post.side_effect = [token_response, failed_upload]
         with TemporaryDirectory() as directory:
             image = Path(directory) / "views_trend.png"
@@ -85,6 +96,28 @@ class FeishuImageUploaderTests(unittest.TestCase):
 
         self.assertEqual(keys, {})
         self.assertTrue(any("降级为文字版" in line for line in logs.output))
+        self.assertTrue(any("234001" in line for line in logs.output))
+        self.assertFalse(any("tenant-token" in line for line in logs.output))
+
+    def test_missing_image_scope_has_actionable_hint(self) -> None:
+        failed_upload = response(
+            {
+                "code": 99991672,
+                "msg": "Access denied. scope im:resource:upload is required",
+            },
+            status_code=400,
+        )
+        failed_upload.raise_for_status.side_effect = requests.HTTPError("400 bad request")
+        self.session.post.side_effect = [
+            response({"code": 0, "tenant_access_token": "tenant-token"}),
+            failed_upload,
+        ]
+
+        with TemporaryDirectory() as directory:
+            image = Path(directory) / "top_articles.png"
+            image.write_bytes(b"png")
+            with self.assertRaisesRegex(RuntimeError, "im:resource:upload"):
+                self.uploader.upload_image(image)
 
 
 if __name__ == "__main__":
