@@ -71,11 +71,11 @@ class AccountChannelTrendRow:
 
 
 @dataclass(frozen=True)
-class AccountContentStatRow:
+class AccountDailyStatRow:
     stat_date: date
-    share_users: int | None
-    original_read_users: int | None
-    favorite_users: int | None
+    views: int | None
+    shares: int | None
+    favorites: int | None
     publish_count: int | None
 
 
@@ -113,18 +113,28 @@ class WechatXlsBatch:
     period_start: date
     period_end: date
     account_channel_trends: list[AccountChannelTrendRow] = field(default_factory=list)
-    account_content_stats: list[AccountContentStatRow] = field(default_factory=list)
+    account_daily_stats: list[AccountDailyStatRow] = field(default_factory=list)
     articles: list[ArticleSourceRow] = field(default_factory=list)
     article_totals: list[ArticleTotalRow] = field(default_factory=list)
-    article_channels: list[ArticleChannelRow] = field(default_factory=list)
+    article_channel_stats: list[ArticleChannelRow] = field(default_factory=list)
+
+    @property
+    def account_content_stats(self) -> list[AccountDailyStatRow]:
+        """兼容旧调用方；新入库表为 account_daily_stats。"""
+        return self.account_daily_stats
+
+    @property
+    def article_channels(self) -> list[ArticleChannelRow]:
+        """兼容旧调用方；新入库表为 article_channel_stats。"""
+        return self.article_channel_stats
 
     @property
     def total_source_rows(self) -> int:
         return (
             len(self.account_channel_trends)
-            + len(self.account_content_stats)
+            + len(self.account_daily_stats)
             + len(self.article_totals)
-            + len(self.article_channels)
+            + len(self.article_channel_stats)
         )
 
 
@@ -178,7 +188,7 @@ def parse_wechat_xls(path: Path) -> WechatXlsBatch:
     header_index, column_a, column_b, column_c = _find_header_groups(rows)
     period_start, period_end = _report_period(rows, header_index)
     trends: list[AccountChannelTrendRow] = []
-    account_stats: list[AccountContentStatRow] = []
+    raw_account_stats: list[tuple[date, int | None, int | None, int | None]] = []
     article_by_key: dict[str, ArticleSourceRow] = {}
     totals: dict[str, ArticleTotalRow] = {}
     channels: dict[tuple[str, str], ArticleChannelRow] = {}
@@ -196,13 +206,13 @@ def parse_wechat_xls(path: Path) -> WechatXlsBatch:
 
         b = row[column_b : column_b + len(REGION_B_HEADERS)]
         if any(value not in (None, "") for value in b):
-            account_stats.append(
-                AccountContentStatRow(
-                    stat_date=_date(b[0], f"第{row_number}行区域B日期"),
-                    share_users=_integer(b[1], "分享人数"),
-                    original_read_users=_integer(b[2], "跳转阅读原文人数"),
-                    favorite_users=_integer(b[3], "微信收藏人数"),
-                    publish_count=_integer(b[4], "发表篇数"),
+            # 新表没有“跳转阅读原文人数”字段，不强行映射。
+            raw_account_stats.append(
+                (
+                    _date(b[0], f"第{row_number}行区域B日期"),
+                    _integer(b[1], "分享人数"),
+                    _integer(b[3], "微信收藏人数"),
+                    _integer(b[4], "发表篇数"),
                 )
             )
 
@@ -227,16 +237,31 @@ def parse_wechat_xls(path: Path) -> WechatXlsBatch:
                     read_percent=_percent(c[4]),
                 )
 
-    if not trends or not account_stats or not article_by_key:
+    if not trends or not raw_account_stats or not article_by_key:
         raise ValueError("微信 .xls 三个数据区域未完整识别")
+    daily_views = {
+        row.stat_date: row.read_users
+        for row in trends
+        if row.channel == "全部"
+    }
+    account_stats = [
+        AccountDailyStatRow(
+            stat_date=stat_date,
+            views=daily_views.get(stat_date),
+            shares=shares,
+            favorites=favorites,
+            publish_count=publish_count,
+        )
+        for stat_date, shares, favorites, publish_count in raw_account_stats
+    ]
     return WechatXlsBatch(
         source_file=path,
         file_hash=hashlib.sha256(path.read_bytes()).hexdigest(),
         period_start=period_start,
         period_end=period_end,
         account_channel_trends=trends,
-        account_content_stats=account_stats,
+        account_daily_stats=account_stats,
         articles=list(article_by_key.values()),
         article_totals=list(totals.values()),
-        article_channels=list(channels.values()),
+        article_channel_stats=list(channels.values()),
     )

@@ -63,11 +63,11 @@ class WechatXlsParserTests(unittest.TestCase):
         self.assertEqual(result["status"], "success")
         self.assertEqual(result["articles"], 21)
         self.assertEqual(result["article_stats"], 13)
-        self.assertEqual(result["account_content_stats"], 30)
-        self.assertEqual(result["article_channels"], 81)
+        self.assertEqual(result["account_daily_stats"], 30)
+        self.assertEqual(result["article_channel_stats"], 81)
         self.assertEqual(result["account_channel_trends_skipped"], 240)
         tables = [table for _, table, _ in client.calls]
-        for table in ("articles", "article_stats", "account_content_stats", "article_channels"):
+        for table in ("articles", "article_stats", "account_daily_stats", "article_channel_stats"):
             self.assertIn(table, tables)
 
         stats_call = next(call for call in client.calls if call[1] == "article_stats")

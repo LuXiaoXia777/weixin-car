@@ -114,11 +114,9 @@ class SupabaseWechatWriter:
 
     def write(self, account_name: str, batch: WechatXlsBatch) -> dict[str, Any]:
         account_id = self._account_id(account_name)
-        if self._successful_import_exists(account_id, batch.file_hash):
-            return {"status": "skipped", "reason": "文件已成功导入", "rows_imported": 0}
-
+        # 真实 .xls 允许重复导入，以 upsert 覆盖同日数据。
         run_id = self._start_import(account_id, batch)
-        counts = {"articles": 0, "article_stats": 0, "account_content_stats": 0, "article_channels": 0}
+        counts = {"articles": 0, "article_stats": 0, "account_daily_stats": 0, "article_channel_stats": 0}
         try:
             article_ids = self._write_articles(account_id, batch)
             counts["articles"] = len(batch.articles)
@@ -146,16 +144,16 @@ class SupabaseWechatWriter:
                 {
                     "account_id": account_id,
                     "stat_date": row.stat_date.isoformat(),
+                    "views": row.views,
+                    "shares": row.shares,
+                    "favorites": row.favorites,
                     "publish_count": row.publish_count,
-                    "share_users": row.share_users,
-                    "favorite_users": row.favorite_users,
-                    "original_read_users": row.original_read_users,
                     "data_source": "manual_import",
                 }
-                for row in batch.account_content_stats
+                for row in batch.account_daily_stats
             ]
-            self._upsert("account_content_stats", account_stats, "account_id,stat_date")
-            counts["account_content_stats"] = len(account_stats)
+            self._upsert("account_daily_stats", account_stats, "account_id,stat_date")
+            counts["account_daily_stats"] = len(account_stats)
 
             channel_stats = [
                 {
@@ -166,10 +164,10 @@ class SupabaseWechatWriter:
                     "read_percent": row.read_percent,
                     "data_source": "manual_import",
                 }
-                for row in batch.article_channels
+                for row in batch.article_channel_stats
             ]
-            self._upsert("article_channels", channel_stats, "article_id,stat_date,channel")
-            counts["article_channels"] = len(channel_stats)
+            self._upsert("article_channel_stats", channel_stats, "article_id,channel,stat_date")
+            counts["article_channel_stats"] = len(channel_stats)
 
             imported = sum(counts.values())
             self._finish_import(run_id, "success", imported)
