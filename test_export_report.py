@@ -13,6 +13,7 @@ from collector.export_report import (
     parse_report_date,
     validate_download,
 )
+from collector.debug import save_debug_artifacts
 
 
 class FakeDownload:
@@ -61,6 +62,19 @@ class ExportReportTests(unittest.TestCase):
         content_text.wait_for.assert_called_once_with(state="visible", timeout=8_000)
         content_action.click.assert_called_once_with()
 
+    def test_debug_artifacts_save_screenshot_and_html(self):
+        with TemporaryDirectory() as temporary:
+            page = MagicMock()
+            page.content.return_value = "<html><body>内容分析</body></html>"
+
+            def write_screenshot(*, path, full_page):
+                Path(path).write_bytes(b"png")
+
+            page.screenshot.side_effect = write_screenshot
+            screenshot, html = save_debug_artifacts(page, Path(temporary))
+            self.assertTrue(screenshot.exists())
+            self.assertIn("内容分析", html.read_text(encoding="utf-8"))
+
     @patch("collector.export_report._trigger_content_download", return_value=FakeDownload())
     @patch("collector.export_report.select_report_date")
     @patch("collector.export_report.navigate_to_content_analysis")
@@ -76,7 +90,7 @@ class ExportReportTests(unittest.TestCase):
             result = export_content_report(page, target, Path(temporary))
             self.assertTrue(result.file_path.exists())
             self.assertEqual(result.file_path.name, "wechat_content_2026-07-16.xls")
-            navigate_mock.assert_called_once_with(page)
+            navigate_mock.assert_called_once_with(page, debug=False, debug_dir=None)
             select_date_mock.assert_called_once_with(page, target)
             download_mock.assert_called_once_with(page)
 

@@ -30,6 +30,10 @@ class BrowserConfig:
     def import_dir(self) -> Path:
         return self.project_root / "data" / "import"
 
+    @property
+    def debug_dir(self) -> Path:
+        return self.project_root / "debug"
+
     def prepare_local_directories(self) -> None:
         """创建只保存在本机且被 Git 忽略的运行目录。"""
 
@@ -38,6 +42,7 @@ class BrowserConfig:
             self.screenshot_dir,
             self.log_dir,
             self.import_dir,
+            self.debug_dir,
         ):
             directory.mkdir(parents=True, exist_ok=True)
 

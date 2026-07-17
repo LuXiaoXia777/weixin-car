@@ -12,6 +12,8 @@ from zoneinfo import ZoneInfo
 
 from playwright.sync_api import Locator, Page, TimeoutError as PlaywrightTimeoutError
 
+from collector.debug import log_visible_menu_texts, manual_content_analysis_handoff
+
 
 LOGGER = logging.getLogger(__name__)
 XLS_SIGNATURE = bytes.fromhex("D0CF11E0A1B11AE1")
@@ -68,7 +70,12 @@ def _named_action(page: Page, names: tuple[str, ...], description: str) -> Locat
     return _unique_visible(candidates, description)
 
 
-def navigate_to_content_analysis(page: Page) -> None:
+def navigate_to_content_analysis(
+    page: Page,
+    *,
+    debug: bool = False,
+    debug_dir: Path | None = None,
+) -> None:
     """只通过可见文本和语义角色进入数据分析、内容分析。"""
 
     if page.get_by_text("内容分析", exact=True).count() == 0:
@@ -77,11 +84,24 @@ def navigate_to_content_analysis(page: Page) -> None:
         try:
             page.get_by_text("内容分析", exact=True).wait_for(state="visible", timeout=8_000)
         except PlaywrightTimeoutError as exc:
+            log_visible_menu_texts(page)
+            if debug and debug_dir is not None:
+                manual_content_analysis_handoff(page, debug_dir)
+                LOGGER.info("已由用户手动进入内容分析页面")
+                return
             raise ExportReportError(
                 "点击数据分析后没有出现内容分析子菜单；页面结构可能已变化"
             ) from exc
 
-    content_analysis = _named_action(page, ("内容分析",), "内容分析菜单")
+    try:
+        content_analysis = _named_action(page, ("内容分析",), "内容分析菜单")
+    except ExportReportError:
+        log_visible_menu_texts(page)
+        if debug and debug_dir is not None:
+            manual_content_analysis_handoff(page, debug_dir)
+            LOGGER.info("已由用户手动进入内容分析页面")
+            return
+        raise
     content_analysis.click()
     page.wait_for_load_state("domcontentloaded")
     LOGGER.info("已进入内容分析页面")
@@ -180,8 +200,15 @@ def validate_download(path: Path, report_date: date) -> ExportResult:
     return ExportResult(path, report_date, size, created_at)
 
 
-def export_content_report(page: Page, target_date: date, output_dir: Path) -> ExportResult:
-    navigate_to_content_analysis(page)
+def export_content_report(
+    page: Page,
+    target_date: date,
+    output_dir: Path,
+    *,
+    debug: bool = False,
+    debug_dir: Path | None = None,
+) -> ExportResult:
+    navigate_to_content_analysis(page, debug=debug, debug_dir=debug_dir)
     select_report_date(page, target_date)
 
     output_dir.mkdir(parents=True, exist_ok=True)

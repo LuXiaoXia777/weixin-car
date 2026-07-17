@@ -207,6 +207,17 @@ python collect_wechat_data.py
 python collect_wechat_data.py --date 2026-07-16
 ```
 
+页面菜单发生变化或需要人工确认时，使用调试模式：
+
+```bash
+python collect_wechat_data.py --debug
+python collect_wechat_data.py --debug --date 2026-07-16
+```
+
+调试模式会保持浏览器窗口，在无法识别“内容分析”时输出当前可见菜单，并等待用户手动点击一次。页面信息保存在 `debug/screenshot.png`、`debug/page.html` 和 `debug/navigation.json`。人工点击后的页面另存为 `debug/after_manual_screenshot.png` 和 `debug/after_manual_page.html`。
+
+`page.html` 可能包含公众号名称、页面内容和临时 URL，请勿上传、分享或提交到 GitHub；整个 `debug/` 目录已被 Git 忽略。
+
 下载文件保存在 `data/import/`，文件名为 `wechat_content_YYYY-MM-DD.xls`；如果微信实际返回新版 `.xlsx`，程序会保留真实扩展名，绝不伪装文件格式。程序使用 Playwright 下载事件等待文件完成，并验证文件存在、大小、Excel 文件头和创建时间。
 
 第一次运行请在打开的浏览器中扫码登录。后续运行会优先复用项目目录下 `wechat-browser-profile/` 中的登录状态；状态失效时会再次提示扫码。该目录包含敏感登录信息，已经被 Git 忽略，不要复制、上传或分享。
