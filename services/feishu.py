@@ -1,6 +1,8 @@
-"""生成表格化运营日报并通过飞书自定义机器人推送。"""
+"""构建并发送飞书 Interactive Card 公众号运营日报。"""
 
 from __future__ import annotations
+
+from typing import Any
 
 import requests
 
@@ -11,152 +13,145 @@ from services.metrics import ReportMetrics
 INSUFFICIENT = "数据不足，暂无法判断"
 
 
-def _cell(value: object) -> str:
-    return str(value).replace("|", "/").replace("\n", " ").strip()
-
-
-def _table(headers: list[str], rows: list[list[object]]) -> str:
-    header = "| " + " | ".join(headers) + " |"
-    divider = "|" + "|".join("---" for _ in headers) + "|"
-    body = "\n".join("| " + " | ".join(_cell(value) for value in row) + " |" for row in rows)
-    return "\n".join((header, divider, body))
+def _clean(value: object) -> str:
+    return str(value).replace("\n", " ").strip()
 
 
 def _lookup(items: list, key: str, value: str, result: str) -> str:
     match = next((item for item in items if getattr(item, key) == value), None)
-    return getattr(match, result) if match else INSUFFICIENT
+    return _clean(getattr(match, result)) if match else INSUFFICIENT
 
 
-def build_report(metrics: ReportMetrics, analysis: AnalysisResult) -> str:
-    overview = _table(
-        ["指标", "数据", "环比", "分析"],
-        [[row["metric"], row["value"], row["change"], row["analysis"]] for row in metrics.overview],
-    )
-
-    ranking_rows = []
-    for rank, item in enumerate(metrics.rankings, start=1):
-        article = item.article
-        judgment = _lookup(analysis.article_judgments, "title", article.title, "judgment")
-        ranking_rows.append(
-            [
-                rank,
-                article.title,
-                item.content_type,
-                f"{article.views:,}",
-                article.likes,
-                article.shares,
-                article.new_followers,
-                f"{item.score:.1f}",
-                judgment,
-            ]
-        )
-    rankings = _table(
-        ["排名", "标题", "类型", "阅读", "点赞", "分享", "涨粉", "评分", "AI判断"],
-        ranking_rows,
-    )
-
-    category_rows = []
-    for row in metrics.categories:
-        content_type = row["content_type"]
-        category_rows.append(
-            [
-                content_type,
-                row["article_count"],
-                f"{row['average_views']:,}",
-                f"{row['average_interaction_rate'] * 100:.2f}%",
-                f"篇均 {row['average_new_followers']:.1f} 粉",
-                _lookup(analysis.category_judgments, "content_type", content_type, "judgment"),
-            ]
-        )
-    categories = _table(
-        ["内容类型", "文章数量", "平均阅读", "平均互动率", "涨粉效果", "判断"],
-        category_rows,
-    )
-
-    blockbuster = _table(
-        ["分析项", "结果"],
-        [
-            ["标题结构", analysis.blockbuster.title_structure],
-            ["用户痛点", analysis.blockbuster.user_pain],
-            ["点击原因", analysis.blockbuster.click_reason],
-            ["内容价值", analysis.blockbuster.content_value],
-            ["可复制公式", analysis.blockbuster.replicable_formula],
-        ],
-    )
-    trends = _table(
-        ["趋势", "数据依据", "判断"],
-        [[item.trend, item.data_basis, item.judgment] for item in analysis.trends],
-    )
-    suggestions = _table(
-        ["优先级", "选题标题", "对应用户需求", "推荐原因"],
-        [[item.priority, item.title, item.user_need, item.reason] for item in analysis.suggestions],
-    )
-    advice = _table(
-        ["建议", "原因"],
-        [[item.advice, item.reason] for item in analysis.advice],
-    )
-
-    return f"""# 🚗 车事人话｜公众号运营日报
-
-**日期：{metrics.report_date.isoformat()}**
-
-## 1. 今日数据概览
-
-{overview}
-
----
-
-## 2. 文章表现排行
-
-评分：阅读量40%｜互动率30%｜涨粉效率30%
-
-{rankings}
-
----
-
-## 3. 内容类型分析（近7天）
-
-{categories}
-
----
-
-## 4. 爆款因素拆解
-
-**最佳文章：{analysis.best_article}**
-
-{blockbuster}
-
----
-
-## 5. 用户兴趣变化
-
-{trends}
-
----
-
-## 6. 下周选题推荐
-
-{suggestions}
-
----
-
-## 7. 最终运营建议
-
-{advice}"""
+def _section_title(text: str) -> dict[str, Any]:
+    return {
+        "tag": "div",
+        "text": {"tag": "lark_md", "content": f"**{text}**"},
+    }
 
 
-def send_report(webhook_url: str, markdown: str, *, timeout: int = 15) -> None:
-    payload = {
-        "msg_type": "interactive",
-        "card": {
-            "header": {
-                "template": "blue",
-                "title": {"tag": "plain_text", "content": "🚗 车事人话公众号运营日报"},
-            },
-            "elements": [{"tag": "div", "text": {"tag": "lark_md", "content": markdown}}],
+def _field(label: str, value: str) -> dict[str, Any]:
+    return {
+        "is_short": True,
+        "text": {
+            "tag": "lark_md",
+            "content": f"**{label}**\n{_clean(value)}",
         },
     }
-    response = requests.post(webhook_url, json=payload, timeout=timeout)
+
+
+def _overview_element(metrics: ReportMetrics) -> dict[str, Any]:
+    values = {row["metric"]: row["value"] for row in metrics.overview}
+    labels = ("发布文章", "总阅读", "平均阅读", "点赞率", "分享率", "新增粉丝")
+    return {
+        "tag": "div",
+        "fields": [_field(label, values.get(label, "—")) for label in labels],
+    }
+
+
+def _article_element(rank: int, item: Any, analysis: AnalysisResult) -> dict[str, Any]:
+    article = item.article
+    interaction_rate = (article.likes + article.shares + article.comments) / article.views
+    judgment = _lookup(analysis.article_judgments, "title", article.title, "judgment")
+    content = (
+        f"**{rank}. {_clean(article.title)}**\n"
+        f"类型：{item.content_type}　｜　阅读：{article.views:,}\n"
+        f"互动率：{interaction_rate * 100:.2f}%　｜　涨粉：{article.new_followers:+d}\n"
+        f"AI评价：{judgment}"
+    )
+    return {"tag": "div", "text": {"tag": "lark_md", "content": content}}
+
+
+def _blockbuster_element(analysis: AnalysisResult) -> dict[str, Any]:
+    detail = analysis.blockbuster
+    content = (
+        f"**最佳文章：{_clean(analysis.best_article)}**\n"
+        f"标题结构：{_clean(detail.title_structure)}\n"
+        f"用户痛点：{_clean(detail.user_pain)}\n"
+        f"点击原因：{_clean(detail.click_reason)}\n"
+        f"内容价值：{_clean(detail.content_value)}\n"
+        f"可复制公式：{_clean(detail.replicable_formula)}"
+    )
+    return {"tag": "div", "text": {"tag": "lark_md", "content": content}}
+
+
+def _trend_element(analysis: AnalysisResult) -> dict[str, Any]:
+    lines = []
+    for item in analysis.trends:
+        lines.append(f"{_clean(item.trend)}：{_clean(item.data_basis)}；{_clean(item.judgment)}")
+    return {
+        "tag": "div",
+        "text": {"tag": "plain_text", "content": "\n".join(lines)},
+    }
+
+
+def _suggestions_element(analysis: AnalysisResult) -> dict[str, Any]:
+    lines = []
+    for index, item in enumerate(analysis.suggestions, start=1):
+        lines.append(
+            f"{index}. **{_clean(item.title)}**\n"
+            f"   用户需求：{_clean(item.user_need)}｜推荐原因：{_clean(item.reason)}"
+        )
+    return {
+        "tag": "div",
+        "text": {"tag": "lark_md", "content": "\n".join(lines)},
+    }
+
+
+def build_report(metrics: ReportMetrics, analysis: AnalysisResult) -> dict[str, Any]:
+    """返回可直接提交给飞书 Webhook 的 Interactive Card 请求体。"""
+    elements: list[dict[str, Any]] = [
+        {
+            "tag": "div",
+            "text": {
+                "tag": "plain_text",
+                "content": f"数据日期：{metrics.report_date.isoformat()}",
+            },
+        },
+        _section_title("📊 数据概览"),
+        _overview_element(metrics),
+        {"tag": "hr"},
+        _section_title("🔥 文章排行"),
+    ]
+
+    for rank, item in enumerate(metrics.rankings, start=1):
+        elements.append(_article_element(rank, item, analysis))
+        if rank < len(metrics.rankings):
+            elements.append({"tag": "hr"})
+
+    elements.extend(
+        [
+            {"tag": "hr"},
+            _section_title("🏆 爆款分析"),
+            _blockbuster_element(analysis),
+            {"tag": "hr"},
+            _section_title("📈 7天内容趋势"),
+            _trend_element(analysis),
+            {"tag": "hr"},
+            _section_title("💡 选题建议"),
+            _suggestions_element(analysis),
+        ]
+    )
+
+    return {
+        "msg_type": "interactive",
+        "card": {
+            "config": {"wide_screen_mode": True},
+            "header": {
+                "template": "blue",
+                "title": {
+                    "tag": "plain_text",
+                    "content": "🚗 车事人话｜公众号运营日报",
+                },
+            },
+            "elements": elements,
+        },
+    }
+
+
+def send_report(webhook_url: str, card_payload: dict[str, Any], *, timeout: int = 15) -> None:
+    if card_payload.get("msg_type") != "interactive":
+        raise ValueError("飞书消息必须使用 interactive 类型")
+    response = requests.post(webhook_url, json=card_payload, timeout=timeout)
     response.raise_for_status()
     result = response.json()
     if result.get("code", result.get("StatusCode", 0)) != 0:

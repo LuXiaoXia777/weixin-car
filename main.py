@@ -38,13 +38,13 @@ def run(*, dry_run: bool = False) -> None:
         prompt_file=settings.prompt_file,
         metrics=metrics,
     )
-    markdown = build_report(metrics, analysis)
+    card = build_report(metrics, analysis)
 
     if dry_run:
-        print(markdown)
+        print(card)
         LOGGER.info("本地测试完成，未发送飞书消息")
         return
-    send_report(settings.feishu_webhook_url, markdown)
+    send_report(settings.feishu_webhook_url, card)
     LOGGER.info("日报已成功推送到飞书")
 
 
