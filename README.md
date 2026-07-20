@@ -34,6 +34,12 @@ python run_daily_report.py
 python run_daily_report.py --force
 ```
 
+## macOS 手机远程触发
+
+项目提供 macOS LaunchAgent，支持每天 12:30 本地定时运行，以及 iPhone 快捷指令通过 SSH 远程触发。它不依赖 Codex 控制终端。
+
+完整安装、macOS 权限、iPhone 快捷指令和排错说明见 [docs/macos_remote_trigger.md](docs/macos_remote_trigger.md)。配置文件已创建，但不会自动安装或执行真实日报。
+
 ## 环境配置
 
 项目根目录的 `.env` 需包含：

@@ -38,6 +38,11 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="保存页面截图/HTML，并在定位失败时等待人工点击",
     )
+    parser.add_argument(
+        "--non-interactive",
+        action="store_true",
+        help="导出完成后不等待终端回车，供 launchd 总控流程使用",
+    )
     return parser.parse_args()
 
 
@@ -78,7 +83,8 @@ def main() -> None:
             )
             LOGGER.info("第二阶段完成：%s", result.file_path)
             print(f"导出完成：{result.file_path}")
-            input("浏览器将保持打开。确认下载结果后按回车键退出：")
+            if not args.non_interactive:
+                input("浏览器将保持打开。确认下载结果后按回车键退出：")
         except Exception:
             browser.save_failure_screenshot()
             if args.debug and browser.page is not None:

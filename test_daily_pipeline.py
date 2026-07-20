@@ -110,6 +110,7 @@ class DailyPipelineTests(unittest.TestCase):
             self.assertEqual(result, {"status": "success", "date": "2026-07-16"})
             self.assertEqual(len(calls), 5)
             self.assertIn("collect_wechat_data.py", calls[0])
+            self.assertIn("--non-interactive", calls[0])
             self.assertIn("import_wechat_data.py", calls[1])
             self.assertIn("services.analysis_service", calls[2])
             self.assertIn("services.ai_analyzer", calls[3])

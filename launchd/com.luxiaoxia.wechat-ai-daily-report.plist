@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.luxiaoxia.wechat-ai-daily-report</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/Users/design/Documents/微信公众号数据分析/weixin-car-repo/scripts/run_daily_report.sh</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>/Users/design/Documents/微信公众号数据分析/weixin-car-repo</string>
+
+    <!-- 每天 12:30 尝试运行；报告仍以数据库最新成功导入日期为准。 -->
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Hour</key>
+        <integer>12</integer>
+        <key>Minute</key>
+        <integer>30</integer>
+    </dict>
+
+    <key>RunAtLoad</key>
+    <false/>
+    <key>KeepAlive</key>
+    <false/>
+    <key>ProcessType</key>
+    <string>Interactive</string>
+    <key>LimitLoadToSessionType</key>
+    <string>Aqua</string>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PYTHONUNBUFFERED</key>
+        <string>1</string>
+        <key>PATH</key>
+        <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    </dict>
+
+    <key>StandardOutPath</key>
+    <string>/Users/design/Documents/微信公众号数据分析/weixin-car-repo/logs/launchd.stdout.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/design/Documents/微信公众号数据分析/weixin-car-repo/logs/launchd.stderr.log</string>
+</dict>
+</plist>

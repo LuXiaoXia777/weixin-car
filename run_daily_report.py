@@ -171,7 +171,7 @@ class DailyReportPipeline:
         sync_run_id: str | None = None
         try:
             self._status(1, "启动微信后台采集，请按页面提示完成登录或安全验证…")
-            self._run([self.python, "collect_wechat_data.py"])
+            self._run([self.python, "collect_wechat_data.py", "--non-interactive"])
             self._status(1, "微信报表下载完成")
 
             selected = self.latest_xls_finder(self.project_root / "data" / "import")
