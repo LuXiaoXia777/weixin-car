@@ -4,10 +4,6 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
-from pathlib import Path
-
-
-BASE_DIR = Path(__file__).resolve().parent
 
 
 @dataclass(frozen=True)
@@ -18,8 +14,6 @@ class Settings:
     feishu_app_secret: str = ""
     deepseek_model: str = "deepseek-v4-flash"
     deepseek_base_url: str = "https://api.deepseek.com"
-    articles_csv: Path = BASE_DIR / "data" / "articles.csv"
-    prompt_file: Path = BASE_DIR / "prompts" / "analysis_prompt.txt"
 
     @classmethod
     def from_env(cls, *, require_feishu: bool = True) -> "Settings":
@@ -38,5 +32,4 @@ class Settings:
             deepseek_base_url=os.getenv(
                 "DEEPSEEK_BASE_URL", "https://api.deepseek.com"
             ).rstrip("/"),
-            articles_csv=Path(os.getenv("ARTICLES_CSV", BASE_DIR / "data" / "articles.csv")),
         )

@@ -1,244 +1,139 @@
-# AI 公众号数据分析机器人
+# 车事人话 AI 公众号运营助手
 
-每天读取最近 7 天公众号文章数据，调用 DeepSeek 生成汽车内容运营分析，并通过飞书自定义机器人推送日报。
-
-## V1 数据架构
-
-生产数据将采用以下流程，不使用微信云托管，也不使用 SQLite：
+本项目是一个需要在本机手动启动的半自动微信公众号数据分析工具。
 
 ```text
-微信公众平台后台导出 Excel/CSV
+本机 Playwright 打开微信公众平台
           ↓
-Python 导入服务
+用户手动登录/安全验证后导出 XLS
           ↓
-Supabase PostgreSQL（唯一生产数据库）
+解析并写入 Supabase PostgreSQL
           ↓
-GitHub Actions 每日分析
+生成指标报告与图表
           ↓
-DeepSeek → 飞书 Interactive Card
+DeepSeek 运营分析
+          ↓
+飞书 Interactive Card 日报
 ```
 
-当前提交完成第一阶段：Supabase 数据库结构、`.xlsx`/`.csv` 解析、校验和幂等导入。现有 CSV 日报流程暂时保留，下一阶段再把每日分析的数据源切换到 Supabase。
+## 重要：不会自动发送
 
-## 工作方式
+项目已取消 GitHub Actions 定时任务，不会在每天固定时间自动调用 DeepSeek 或发送飞书消息。
 
-1. GitHub Actions 每天北京时间 09:00 启动。
-2. 程序读取 `data/articles.csv` 中截至最新日期的最近 7 天数据。
-3. DeepSeek 分析标题吸引力、购买心理、内容趋势和次日选题。
-4. 飞书自定义机器人将结果发送到指定群聊。
+只有当用户在本机终端主动运行以下命令时，才会执行完整流程并发送飞书日报：
 
-日报使用飞书 Interactive Card 原生布局：数据概览以双列字段展示，文章排行逐篇展示，另含爆款拆解、7天趋势和选题建议。阅读、互动率、涨粉效率、环比和综合评分由程序计算；AI 只负责基于这些数据生成短句判断。
+```bash
+cd "/Users/design/Documents/微信公众号数据分析/weixin-car-repo"
+source .venv/bin/activate
+python run_daily_report.py
+```
 
-第一阶段的 CSV 不会自动更新。要得到新的日报，需要在仓库中追加或更新最新一天的数据。
+同一数据日期已成功发送时，默认会根据 `sync_runs` 记录跳过重复发送。如需人工强制重发：
 
-## 1. 创建 GitHub 仓库
+```bash
+python run_daily_report.py --force
+```
 
-1. 登录 GitHub，点击右上角 `+`，选择 **New repository**。
-2. 仓库名填写 `wechat-ai-assistant`。
-3. 建议选择 **Private**，不要勾选自动创建 README。
-4. 创建后，按照 GitHub 页面提示把本项目上传到仓库。
+## 环境配置
 
-如果使用 GitHub Desktop：选择 **Add Existing Repository**，指向本项目文件夹；若提示它还不是仓库，选择创建仓库，然后点击 **Publish repository**。
+项目根目录的 `.env` 需包含：
 
-## 2. 添加 GitHub Secrets
+```dotenv
+SUPABASE_URL=...
+SUPABASE_SERVICE_ROLE_KEY=...
+DEEPSEEK_API_KEY=...
+DEEPSEEK_MODEL=deepseek-v4-flash
+FEISHU_WEBHOOK_URL=...
+FEISHU_APP_ID=...
+FEISHU_APP_SECRET=...
+```
 
-打开仓库，依次进入：
+`.env` 、微信登录状态、导出数据、日志、截图、报告 JSON 和图表均已被 Git 忽略，不应提交到仓库。
 
-**Settings → Secrets and variables → Actions → New repository secret**
+## 首次安装
 
-创建两个 Secret：
-
-- `DEEPSEEK_API_KEY`：DeepSeek API 密钥。
-- `FEISHU_WEBHOOK_URL`：飞书自定义机器人的完整 Webhook 地址。
-
-不要把密钥写入代码、CSV、Issue 或 Actions 日志。
-
-## 3. 配置飞书机器人
-
-1. 打开接收日报的飞书群。
-2. 进入 **群设置 → 群机器人 → 添加机器人 → 自定义机器人**。
-3. 设置机器人名称，例如“车事人话数据助手”。
-4. 安全设置可先选择“自定义关键词”，填写 `车事人话`。本项目卡片标题包含该关键词。
-5. 复制 Webhook 地址，并保存到 GitHub Secret `FEISHU_WEBHOOK_URL`。
-
-Webhook 相当于机器人密码，不要发送给其他人。
-
-## 4. 本地测试
-
-需要 Python 3.11+。在本项目目录执行：
+需要 Python 3.11+：
 
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install -r requirements.txt
-export DEEPSEEK_API_KEY="你的 DeepSeek API 密钥"
-python main.py --dry-run
+python -m playwright install chromium
 ```
 
-`--dry-run` 会调用 DeepSeek 并在终端显示日报，但不会发送飞书消息。
+## 分步运行
 
-只测试 DeepSeek API 连接和模拟数据分析：
+只采集微信后台 XLS：
 
 ```bash
-python test_ai.py
+python collect_wechat_data.py
+python collect_wechat_data.py --date 2026-07-16
+python collect_wechat_data.py --debug
 ```
 
-成功时会输出 `DeepSeek API连接成功` 和一段 JSON 分析结果。
+首次运行会打开有界面 Chromium，用户负责扫码登录和安全验证。登录状态保存在本机 `wechat-browser-profile/`，不会上传。
 
-测试真实飞书推送：
+只导入已下载的微信 XLS：
 
 ```bash
-export FEISHU_WEBHOOK_URL="你的飞书 Webhook"
-python main.py
+python import_wechat_data.py data/import/wechat_content_YYYY-MM-DD.xls
 ```
 
-退出终端后，上述 `export` 设置会失效，不会写入项目文件。
-
-## 5. 在 GitHub 手动测试
-
-1. 打开仓库的 **Actions** 页面。
-2. 左侧选择 **Daily WeChat AI Report**。
-3. 点击 **Run workflow → Run workflow**。
-4. 等待任务变为绿色对勾。
-5. 检查飞书群是否收到“车事人话公众号日报”。
-
-若任务显示红色叉号，点击该次运行，再点击 **Generate and send report** 查看错误日志。不要在日志或截图中暴露密钥。
-
-## 6. 每日自动运行
-
-工作流文件位于 `.github/workflows/daily_report.yml`，定时表达式为 `0 1 * * *`。GitHub 使用 UTC，因此对应北京时间每天 09:00。GitHub 的定时任务可能因平台繁忙延迟数分钟，不保证精确到秒。
-
-定时工作流只会运行默认分支上的版本。请确保代码已经推送到默认分支，并在 Actions 页面启用了工作流。
-
-## CSV 数据格式
-
-编辑 `data/articles.csv`，字段为：
-
-```text
-date,title,category,views,likes,shares,comments,new_followers
-```
-
-日期格式必须是 `YYYY-MM-DD`，数值列只能填写整数。当前 MVP 以 CSV 中最新日期作为日报日期，并分析截至该日的最近 7 个自然日。
-
-## Supabase 数据库与后台导出文件导入
-
-### 1. 创建数据库表
-
-1. 在 Supabase 新建项目。
-2. 打开 **SQL Editor → New query**。
-3. 复制并执行 `database/schema.sql` 的全部内容。
-
-脚本会创建公众号、文章、文章每日数据、用户每日数据和导入记录等表。表已启用 RLS，并且没有向匿名用户开放策略。`service_role` 密钥权限很高，只能保存在本机环境变量或 GitHub Secrets 中，不能放进仓库或前端代码。
-
-### 2. 配置本地环境变量
-
-在 Supabase 项目的 **Project Settings → API** 中取得项目地址和 `service_role` 密钥，然后在当前终端设置：
+只生成指标报告：
 
 ```bash
-export SUPABASE_URL="https://你的项目.supabase.co"
-export SUPABASE_SERVICE_ROLE_KEY="你的 service_role 密钥"
+python -m services.analysis_service --output report.json
 ```
 
-未来在 GitHub Actions 中使用时，创建同名 GitHub Secrets：
-
-- `SUPABASE_URL`
-- `SUPABASE_SERVICE_ROLE_KEY`
-
-### 3. 先校验，再导入
-
-导入服务同时支持 `.xlsx` 和 `.csv`。建议把真实导出文件放入本机 `data/imports/`，该目录已被 Git 忽略：
+只运行 DeepSeek 分析：
 
 ```bash
-python import_wechat_data.py data/imports/微信数据.xlsx --account-name 车事人话 --dry-run
-python import_wechat_data.py data/imports/微信数据.xlsx --account-name 车事人话
+python -m services.ai_analyzer report.json
 ```
 
-CSV 用法相同：
+只生成图表并发送已有报告：
 
 ```bash
-python import_wechat_data.py data/imports/微信数据.csv --account-name 车事人话
+python -m services.feishu_sender --report report.json --analysis ai_analysis.json
 ```
 
-导入程序会识别常见中英文列名，例如文章标题、发布时间、数据日期、阅读量、点赞、在看、分享、留言、新增关注、取消关注和净增关注。一个 XLSX 可以包含文章数据与用户数据等多个工作表。缺失字段会以数据库 `NULL` 保存，不会编造为 0；相同文件重复执行会被跳过，文章及每日数据也会按唯一键更新而不是重复新增。
+## 数据存储与安全
 
-如果微信后台导出的真实表头未被识别，请保留原始表头并补充映射，不要手工改造或补造数据。
+生产数据唯一存储为 Supabase PostgreSQL。主要数据表包括：
 
-## 可选配置
+- `wechat_accounts`
+- `articles`
+- `article_stats`
+- `account_daily_stats`
+- `article_channel_stats`
+- `import_runs`
+- `sync_runs`
 
-模型通过 GitHub Repository Variable `DEEPSEEK_MODEL` 控制，当前默认使用 `deepseek-v4-flash`。进入 **Settings → Secrets and variables → Actions → Variables** 即可更换模型，无需修改代码。API 地址默认为 `https://api.deepseek.com`，也可通过 `DEEPSEEK_BASE_URL` 覆盖。
+数据库使用 RLS，Python 后台通过 `service_role` 访问。不要在代码、日志、Issue 或截图中暴露任何密钥。
 
-### 飞书日报 2.0 图表配置
+## 飞书图片卡片
 
-日报会在 `data/charts/` 生成近7天阅读趋势图和TOP5文章排行图。飞书卡片图片必须先通过飞书开放平台上传并取得 `image_key`，本机文件路径不能直接显示在群卡片中。
+`services/report_visualizer.py` 会生成：
 
-若希望卡片显示两张图，请创建飞书企业自建应用，配置以下环境变量：
+- `data/charts/views_trend.png`
+- `data/charts/top_articles.png`
+
+`services/feishu_image_uploader.py` 使用飞书应用凭证上传图片并获得 `image_key`。飞书应用需要开启机器人能力，并具有 `im:resource:upload` 权限。图片上传失败时，日报会降级为文字卡片，不会中断 Webhook 发送。
+
+## 测试
 
 ```bash
-FEISHU_APP_ID=你的飞书应用AppID
-FEISHU_APP_SECRET=你的飞书应用AppSecret
+python -m unittest discover -v
 ```
 
-只配置 `FEISHU_WEBHOOK_URL` 时，系统仍会生成本地图表并正常发送日报，但卡片内会自动使用紧凑文字版趋势和TOP5排行。
+Supabase 真实权限测试默认跳过，只有显式设置 `RUN_SUPABASE_PERMISSION_TEST=1` 时才会运行。
 
-## 后续扩展位置
+## Git 自动推送
 
-- 微信公众号 API：在 `services/data_loader.py` 增加新的数据源实现。
-- 飞书多维表格与历史存储：新增独立 storage service。
-- 周报/月报：在数据加载后增加报告周期参数。
-- 自动选题库：保存 `suggestions` 到新的数据文件或外部存储。
-
-## 本机提交后自动推送
-
-仓库包含 `.githooks/post-commit`。在一台新电脑首次克隆仓库后，执行一次：
+仓库包含 `.githooks/post-commit`。配置后，每次本地 commit 成功会自动 push：
 
 ```bash
 git config core.hooksPath .githooks
 ```
 
-此后每次 `git commit` 成功都会自动推送当前分支。该功能不会自动执行 `git add`，提交前仍需确认暂存内容，避免误提交密钥或临时文件。
-
-## 微信公众号后台本机采集助手（第二阶段）
-
-采集助手负责打开有界面的专用 Chromium、复用本机登录状态、等待用户扫码，并通过微信公众号后台可见控件导出内容分析 Excel。它不会调用未公开接口，也不会绕过验证码与微信安全验证。
-
-首次安装：
-
-```bash
-python -m pip install -r requirements.txt
-python -m playwright install chromium
-```
-
-启动：
-
-```bash
-python collect_wechat_data.py
-```
-
-默认导出昨天的内容分析报表，也可以指定日期：
-
-```bash
-python collect_wechat_data.py --date 2026-07-16
-```
-
-页面菜单发生变化或需要人工确认时，使用调试模式：
-
-```bash
-python collect_wechat_data.py --debug
-python collect_wechat_data.py --debug --date 2026-07-16
-```
-
-调试模式会保持浏览器窗口，在无法识别“内容分析”时输出当前可见菜单，并等待用户手动点击一次。页面信息保存在 `debug/screenshot.png`、`debug/page.html` 和 `debug/navigation.json`。人工点击后的页面另存为 `debug/after_manual_screenshot.png` 和 `debug/after_manual_page.html`。
-
-`page.html` 可能包含公众号名称、页面内容和临时 URL，请勿上传、分享或提交到 GitHub；整个 `debug/` 目录已被 Git 忽略。
-
-下载文件保存在 `data/import/`，文件名为 `wechat_content_YYYY-MM-DD.xls`；如果微信实际返回新版 `.xlsx`，程序会保留真实扩展名，绝不伪装文件格式。程序使用 Playwright 下载事件等待文件完成，并验证文件存在、大小、Excel 文件头和创建时间。
-
-第一次运行请在打开的浏览器中扫码登录。后续运行会优先复用项目目录下 `wechat-browser-profile/` 中的登录状态；状态失效时会再次提示扫码。该目录包含敏感登录信息，已经被 Git 忽略，不要复制、上传或分享。
-
-登录等待时间默认5分钟，可按需调整：
-
-```bash
-python collect_wechat_data.py --login-timeout 600
-```
-
-Supabase 导入、DeepSeek 分析及飞书日报将在第三阶段接入，当前入口不会触发这些操作。
+它不会自动执行 `git add`，也不会自动运行或发送日报。
